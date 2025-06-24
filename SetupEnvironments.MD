@@ -12,6 +12,8 @@ Basic build tools (make, gcc/g++) should be installed on your system for compili
 This script assumes a Debian/Ubuntu-based Linux distribution. Adjust PATH modifications for other shells (e.g., ~/.zshrc for zsh) if needed.
 # How to run the script:
 
-Save the following content to a file named setup_envs.sh.
-Make the script executable: chmod +x setup_envs.sh
-Execute the script: ./setup_envs.sh
+- Save the following content to a file named setup_envs.sh
+
+- Make the script executable: chmod +x setup_envs.sh
+
+- Execute the script: ./setup_envs.sh
