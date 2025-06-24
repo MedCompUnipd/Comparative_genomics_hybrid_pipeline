@@ -10,8 +10,7 @@ Run the installer: bash Miniconda3-latest-Linux-x86_64.sh (accept terms, choose 
 Restart your terminal or run source ~/.bashrc (or source ~/.zshrc if you use zsh).
 Basic build tools (make, gcc/g++) should be installed on your system for compiling tools like FASTA package, if you choose to install it. If not, you might need to install them manually (e.g., sudo apt install build-essential on Ubuntu/Debian).
 This script assumes a Debian/Ubuntu-based Linux distribution. Adjust PATH modifications for other shells (e.g., ~/.zshrc for zsh) if needed.
-
-ùHow to run the script:
+# How to run the script:
 
 Save the following content to a file named setup_envs.sh.
 Make the script executable: chmod +x setup_envs.sh
