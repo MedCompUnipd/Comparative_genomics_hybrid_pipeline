@@ -33,11 +33,8 @@ This pipeline includes scripts and configurations for:
 ## ✅ Requirements
 - Bash (Linux environment)
 - Conda or Miniconda installed
-- Compatible bioinformatics tools installed and accessible in your $PATH (see environment setup below)
+- Compatible bioinformatics tools installed and accessible in your $PATH (read the SetupEnvironments file)
 
-## 🛠 Installation and Setup
-**Create the Conda environments and install tools**:
-Run the script create_conda_envs.sh
 
 ## 🚀 Running the Pipeline
 Run the main orchestration script
