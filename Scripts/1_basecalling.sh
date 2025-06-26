@@ -30,7 +30,7 @@ if [[ "$CONVERT_CHOICE" =~ ^[Yy]$ ]]; then
 fi
 
 read -p "Directory for .pod5 files (output or existing): " POD5_DIR
-read -p "Output directory for FASTQ files: " OUT_DIR
+read -p "Output directory for FASTQ files (this will now contain trimmed files directly): " OUT_DIR
 
 THREADS=8 # Default threads, can be made interactive if needed
 LOG_DIR="${OUT_DIR}/logs"
@@ -39,9 +39,10 @@ LOG_DIR="${OUT_DIR}/logs"
 echo "[INFO] Creating output directories..."
 mkdir -p "$POD5_DIR" "$OUT_DIR" "$LOG_DIR"
 
-# === [1/3] OPTIONAL: CONVERT FAST5 → POD5 ===
+# === [1/2] OPTIONAL: CONVERT FAST5 yo POD5 ===
+# Renumbered from [1/3] as trimming will be integrated into basecalling
 if [[ "$CONVERT_CHOICE" =~ ^[Yy]$ ]]; then
-    echo "[1/3] Converting .fast5 to .pod5..."
+    echo "[1/2] Converting .fast5 to .pod5..."
 
     shopt -s nullglob
     FAST5_FILES=("$FAST5_DIR"/*.fast5)
@@ -55,23 +56,25 @@ if [[ "$CONVERT_CHOICE" =~ ^[Yy]$ ]]; then
     for file in "${FAST5_FILES[@]}"; do
         base_name=$(basename "$file" .fast5)
         output_file="${POD5_DIR}/${base_name}.pod5"
-        echo "→ Converting $file to $output_file..."
+        echo "Converting $file to $output_file..."
         pod5 convert from_fast5 "$file" -o "$output_file" || { echo "[ERROR] pod5 conversion failed for $file."; exit 1; }
     done
 
     echo "Conversion complete: ${#FAST5_FILES[@]} files processed."
 else
-    echo "[1/3] Skipping conversion step. Using existing .pod5 files."
+    echo "[1/2] Skipping conversion step. Using existing .pod5 files."
 fi
 
-# === [2/3] DORADO BASECALLING ===
-echo "[2/3] Running Dorado basecalling..."
+# ---
+
+## [2/2] DORADO BASECALLING WITH INTEGRATED TRIMMING
+
+echo "[2/2] Running Dorado basecalling with integrated adapter trimming..."
 echo "To perform basecalling, Dorado needs a basecalling model."
 read -p "Please insert the path of the directory for Dorado basecalling models download: " DORADO_MODELS_DIR
 mkdir -p "$DORADO_MODELS_DIR"
 
 pushd "$DORADO_MODELS_DIR" > /dev/null
-# Check if dorado command exists before trying to download models
 if ! command_exists dorado; then
     echo "[ERROR] 'dorado' command not found. Please ensure Dorado is installed and in your PATH."
     popd > /dev/null
@@ -94,37 +97,14 @@ fi
 
 for pod5_file in "${POD5_FILES[@]}"; do
     base_name=$(basename "$pod5_file" .pod5)
-    dorado_out_fastq="${OUT_DIR}/${base_name}.fastq"
+    dorado_out_fastq="${OUT_DIR}/${base_name}.fastq" 
     dorado_log="${LOG_DIR}/${base_name}_dorado.log"
-    echo "→ Basecalling $pod5_file. Output to $dorado_out_fastq"
-    dorado basecaller "$MODEL_PATH" "$pod5_file" --threads "$THREADS" > "$dorado_out_fastq" 2> "$dorado_log" || { echo "[ERROR] Dorado basecalling failed for $pod5_file. Check $dorado_log"; exit 1; }
+    echo "Basecalling and trimming $pod5_file. Output to $dorado_out_fastq"
+		dorado basecaller "$MODEL_PATH" "$pod5_file" --emit-fastq --trim adapters > "$dorado_out_fastq" 2> "$dorado_log"
 done
-echo "Dorado basecalling completed."
-
-# === [3/3] OPTIONAL: ADAPTER TRIMMING with Nanoq (if fastq files exist) ===
-echo "[3/3] Performing adapter trimming with Nanoq..."
-
-shopt -s nullglob
-FASTQ_FILES=("$OUT_DIR"/*.fastq)
-shopt -u nullglob
-
-if [ ${#FASTQ_FILES[@]} -eq 0 ]; then
-    echo "[WARNING] No FASTQ files found in $OUT_DIR for trimming. Skipping trimming step."
-else
-    TRIMMED_DIR="${OUT_DIR}/trimmed"
-    mkdir -p "$TRIMMED_DIR"
-    for fastq_file in "${FASTQ_FILES[@]}"; do
-        base_name=$(basename "$fastq_file" .fastq)
-        trimmed_fastq="${TRIMMED_DIR}/${base_name}_trimmed.fastq"
-        echo "→ Trimming adapters from $fastq_file to $trimmed_fastq"
-        nanoq trim -i "$fastq_file" -o "$trimmed_fastq" || { echo "[ERROR] Nanoq trimming failed for $fastq_file."; exit 1; }
-    done
-    echo "Nanoq adapter trimming completed."
-    echo "[INFO] Trimmed FASTQ files are in $TRIMMED_DIR"
-fi
+echo "Dorado basecalling and trimming completed."
 
 echo ""
 echo "----------------------------------------------"
 echo "Dorado basecalling and trimming pipeline completed successfully!"
-echo "Raw FASTQ files (if generated): $OUT_DIR"
-echo "Trimmed FASTQ files (if generated): $TRIMMED_DIR"
+echo "Trimmed FASTQ files are located in: $OUT_DIR"
