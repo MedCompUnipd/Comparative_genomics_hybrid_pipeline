@@ -1,5 +1,9 @@
 #!/bin/bash
-set -euo pipefail
+
+# Exit immediately if a command exits with a non-zero status.
+set -e
+# Exit if any command in a pipeline fails.
+set -o pipefail
 
 echo "#################################################################"
 echo "# Hybrid Comparative Genomic Pipeline Environment Setup Script #"
@@ -16,6 +20,8 @@ command_exists () {
 }
 
 # --- Determine shell profile file ---
+# Note: The script will directly append to ~/.bashrc as per the user's latest input.
+# This variable is still used for informational messages.
 SHELL_PROFILE=""
 if [[ -n "$BASH_VERSION" ]]; then
     SHELL_PROFILE="$HOME/.bashrc"
@@ -27,369 +33,389 @@ else
 fi
 echo "[INFO] Detected shell profile: $SHELL_PROFILE"
 
-# --- Load Conda Hook ---
+
+# Check if conda is available and load its hook
 echo "[INFO] Loading Conda hook..."
-if command_exists conda; then
-    eval "$(conda shell.bash hook)"
-else
-    echo "[ERROR] Conda not found. Please ensure Conda is installed and initialized in your shell profile."
-    echo "Refer to the 'Requirements' section at the beginning of this script."
+if ! command_exists conda; then
+    echo "[ERROR] Conda is not installed or not in PATH. Please install Miniconda/Anaconda first."
     exit 1
 fi
+# Initialize Conda for the current shell session
+eval "$(conda shell.bash hook)"
+echo "Starting Conda environment setup..."
 
 echo ""
 echo "--- INSTALLING SOFTWARE AND CONDA ENVIRONMENTS ---"
 echo "------------------------------------------------"
 
-# --- Environment: preprocessing_env (Script 1_dorado_bc_trim_int.sh, 4_hybrid.sh) ---
-echo "[1/8] Creating/Activating environment: preprocessing_env"
+# === 1. preprocessing_env ===
+echo "[1/9] Creating environment: preprocessing_env"
 if ! conda env list | grep -q "preprocessing_env"; then
-    echo "[INFO] Creating 'preprocessing_env'..."
-    conda create -y -n preprocessing_env -c bioconda -c conda-forge \
-        python=3.9 ont-fast5-api=4.1.0 pod5=0.2.0 nanoq samtools minimap2 qualimap || { echo "[ERROR] Failed to create 'preprocessing_env' Conda environment. Exiting."; exit 1; }
+    conda create -y -n preprocessing_env -c bioconda -c conda-forge minimap2=2.28 || \
+        { echo "[ERROR] Failed to create 'preprocessing_env' Conda environment. Exiting."; exit 1; }
 else
-    echo "[INFO] Environment 'preprocessing_env' already exists. Activating..."
+    echo "[INFO] Environment 'preprocessing_env' already exists."
 fi
-conda activate preprocessing_env || { echo "[ERROR] Failed to activate 'preprocessing_env' Conda environment. Exiting."; exit 1; }
-echo "[INFO] Environment 'preprocessing_env' activated."
 
-# Specific Dorado 0.9.6 installation
-DORADO_VERSION="0.9.6"
-DORADO_BIN_PATH=""
-
-# Check if dorado is installed and is the correct version
-if command_exists dorado; then
-    CURRENT_DORADO_VERSION=$(dorado --version 2>&1 | grep -oP 'Version \K[0-9]+\.[0-9]+\.[0-9]+')
-    if [[ "$CURRENT_DORADO_VERSION" == "$DORADO_VERSION" ]]; then
-        echo "[INFO] Dorado v$DORADO_VERSION already installed."
-        DORADO_BIN_PATH=$(dirname "$(command -v dorado)")
-    else
-        echo "[WARNING] Dorado is installed but not version $DORADO_VERSION (found $CURRENT_DORADO_VERSION)."
-        read -p "Do you want to proceed with installing Dorado v$DORADO_VERSION? (y/n): " INSTALL_CHOICE
-        if [[ "$INSTALL_CHOICE" =~ ^[Yy]$ ]]; then
-            echo "[INSTALLATION] Installing Dorado v$DORADO_VERSION..."
-            DORADO_INSTALL_DIR="$HOME/opt/dorado"
-            mkdir -p "$DORADO_INSTALL_DIR" || { echo "[ERROR] Failed to create directory $DORADO_INSTALL_DIR for Dorado. Exiting."; exit 1; }
-            if curl -L "https://cdn.oxfordnanopore.com/software/dorado/dorado-$DORADO_VERSION-linux-x64.tar.gz" | tar -xz -C "$DORADO_INSTALL_DIR"; then
-                DORADO_EXTRACTED_DIR="$DORADO_INSTALL_DIR/dorado-$DORADO_VERSION-linux-x64"
-                if [[ ! -d "$DORADO_EXTRACTED_DIR" ]]; then
-                    echo "[ERROR] Dorado extracted directory not found at $DORADO_EXTRACTED_DIR. Tar extraction might have failed. Exiting."
-                    exit 1
-                fi
-                DORADO_BIN_PATH="$DORADO_EXTRACTED_DIR/bin"
-                echo "export PATH=\"$DORADO_BIN_PATH:\$PATH\"" >> "$SHELL_PROFILE"
-                source "$SHELL_PROFILE" # Reload PATH for current session
-                echo "[INFO] Dorado v$DORADO_VERSION installed in $DORADO_BIN_PATH and added to PATH."
-            else
-                echo "[ERROR] Failed to download or extract Dorado v$DORADO_VERSION. Check network and URL. Exiting."
-                exit 1
-            fi
-        else
-            echo "[INFO] Skipping Dorado v$DORADO_VERSION installation."
-        fi
-    fi
-else
-    echo "[INSTALLATION] Installing Dorado v$DORADO_VERSION..."
-    DORADO_INSTALL_DIR="$HOME/opt/dorado"
-    mkdir -p "$DORADO_INSTALL_DIR" || { echo "[ERROR] Failed to create directory $DORADO_INSTALL_DIR for Dorado. Exiting."; exit 1; }
-    if curl -L "https://cdn.oxfordnanopore.com/software/dorado/dorado-$DORADO_VERSION-linux-x64.tar.gz" | tar -xz -C "$DORADO_INSTALL_DIR"; then
-        DORADO_EXTRACTED_DIR="$DORADO_INSTALL_DIR/dorado-$DORADO_VERSION-linux-x64"
-        if [[ ! -d "$DORADO_EXTRACTED_DIR" ]]; then
-            echo "[ERROR] Dorado extracted directory not found at $DORADO_EXTRACTED_DIR. Tar extraction might have failed. Exiting."
-            exit 1
-        fi
-        DORADO_BIN_PATH="$DORADO_EXTRACTED_DIR/bin"
-        echo "export PATH=\"$DORADO_BIN_PATH:\$PATH\"" >> "$SHELL_PROFILE"
-        source "$SHELL_PROFILE" # Reload PATH for current session
-        echo "[INFO] Dorado v$DORADO_VERSION installed in $DORADO_BIN_PATH and added to PATH."
-    else
-        echo "[ERROR] Failed to download or extract Dorado v$DORADO_VERSION. Check network and URL. Exiting."
-        exit 1
-    fi
-fi
+echo "[INFO] Installing pod5 in preprocessing_env"
+conda activate preprocessing_env || { echo "[ERROR] Failed to activate 'preprocessing_env'. Exiting."; exit 1; }
+pip install pod5 || { echo "[ERROR] Failed to install pod5 in 'preprocessing_env'. Exiting."; exit 1; }
 conda deactivate || { echo "[ERROR] Failed to deactivate 'preprocessing_env'. Exiting."; exit 1; }
+echo "[INFO] 'preprocessing_env' setup complete."
 echo ""
 
-# --- Environment: kraken_env (Script 2_tax_sel_qc.sh) ---
-echo "[2/8] Creating/Activating environment: kraken_env"
-if ! conda env list | grep -q "kraken_env"; then
-    echo "[INFO] Creating 'kraken_env'..."
-    conda create -y -n kraken_env -c bioconda -c conda-forge \
-        kraken2 bracken seqtk || { echo "[ERROR] Failed to create 'kraken_env' Conda environment. Exiting."; exit 1; }
+# === Dorado install ===
+echo "[INFO] Downloading and extracting Dorado v0.9.6..."
+# Prompt for Dorado installation directory
+read -p "Path to the directory where Dorado should be installed (e.g., $HOME/opt): " DORADO_DIR
+# Remove trailing slash if present
+DORADO_DIR="${DORADO_DIR%/}"
+
+DORADO_VERSION="0.9.6"
+DORADO_TAR_GZ="dorado-$DORADO_VERSION-linux-x64.tar.gz"
+DORADO_URL="https://cdn.oxfordnanoportal.com/software/analysis/$DORADO_TAR_GZ"
+DORADO_BIN="$DORADO_DIR/dorado-$DORADO_VERSION-linux-x64/bin"
+DORADO_DOWNLOAD_FILENAME="dorado.tar.gz"
+
+if [[ -x "$DORADO_BIN/dorado" ]]; then
+    echo "[INFO] Dorado is already installed in $DORADO_BIN, skipping download."
 else
-    echo "Environment 'kraken_env' already exists. Activating..."
-fi
-conda activate kraken_env || { echo "[ERROR] Failed to activate 'kraken_env' Conda environment. Exiting."; exit 1; }
-echo "[INFO] Environment 'kraken_env' activated."
-echo "[INFO] Remember that Kraken2 requires a database. You will need to download it separately."
-echo "Example: kraken2-build --download-library bacteria --db /path/to/kraken_db"
-echo "Or for a complete database: kraken2-build --download-taxonomy --db /path/to/kraken_db"
-conda deactivate || { echo "[ERROR] Failed to deactivate 'kraken_env'. Exiting."; exit 1; }
-echo ""
-
-# --- Environment: qc_env (Script 2_tax_sel_qc.sh, 3_asm_pol.sh, 5_comparation.sh) ---
-echo "[3/8] Creating/Activating environment: qc_env"
-if ! conda env list | grep -q "qc_env"; then
-    echo "[INFO] Creating 'qc_env'..."
-    conda create -y -n qc_env -c bioconda -c conda-forge \
-        nanoplot=1.40.0 quast bcftools htslib samtools mummer || { echo "[ERROR] Failed to create 'qc_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "Environment 'qc_env' already exists. Activating..."
-fi
-conda activate qc_env || { echo "[ERROR] Failed to activate 'qc_env' Conda environment. Exiting."; exit 1; }
-echo "[INFO] Environment 'qc_env' activated."
-conda deactivate || { echo "[ERROR] Failed to deactivate 'qc_env'. Exiting."; exit 1; }
-echo ""
-
-# --- Environment: assembly_env (Script 3_asm_pol.sh) ---
-echo "[4/8] Creating/Activating environment: assembly_env"
-if ! conda env list | grep -q "assembly_env"; then
-    echo "[INFO] Creating 'assembly_env'..."
-    conda create -y -n assembly_env -c bioconda -c conda-forge \
-        flye wtdbg openjdk=8 paralleltask || { echo "[ERROR] Failed to create 'assembly_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "Environment 'assembly_env' already exists. Activating..."
-fi
-conda activate assembly_env || { echo "[ERROR] Failed to activate 'assembly_env' Conda environment. Exiting."; exit 1; }
-echo "[INFO] Environment 'assembly_env' activated."
-
-# Specific Canu 2.2 installation
-CANU_VERSION="2.2"
-CANU_BIN_PATH=""
-
-if command_exists canu; then
-    CURRENT_CANU_VERSION=$(canu --version 2>&1 | grep -oP 'v\K[0-9]+\.[0-9]+')
-    if [[ "$CURRENT_CANU_VERSION" == "$CANU_VERSION" ]]; then
-        echo "[INFO] Canu v$CANU_VERSION already installed."
-        CANU_BIN_PATH=$(dirname "$(command -v canu)")
+    echo "[INSTALLATION] Attempting to install Dorado v$DORADO_VERSION..."
+    mkdir -p "$DORADO_DIR" || { echo "[ERROR] Failed to create directory $DORADO_DIR for Dorado. Exiting."; exit 1; }
+    
+    pushd "$DORADO_DIR" > /dev/null || { echo "[ERROR] Failed to enter directory $DORADO_DIR. Exiting."; exit 1; }
+    
+    echo "[INFO] Downloading Dorado from $DORADO_URL to $DORADO_DIR/$DORADO_DOWNLOAD_FILENAME..."
+    if curl -fL "$DORADO_URL" -o "$DORADO_DOWNLOAD_FILENAME"; then
+        if [[ -s "$DORADO_DOWNLOAD_FILENAME" ]]; then
+            echo "[INFO] Extracting Dorado from $DORADO_DOWNLOAD_FILENAME..."
+            if tar -xzf "$DORADO_DOWNLOAD_FILENAME"; then
+                rm -f "$DORADO_DOWNLOAD_FILENAME" || echo "[WARNING] Failed to remove temporary Dorado tarball: $DORADO_DOWNLOAD_FILENAME"
+                if [[ -x "$DORADO_BIN/dorado" ]]; then
+                    echo "[INFO] Dorado v$DORADO_VERSION installed successfully."
+                    echo "[INFO] Dorado version check: $("$DORADO_BIN/dorado" --version 2>&1)"
+                else
+                    echo "[ERROR] Dorado executable not found at $DORADO_BIN/dorado after extraction. Please check the extracted directory structure. Exiting.";
+                    popd > /dev/null; exit 1
+                fi
+            else
+                echo "[ERROR] Failed to extract Dorado from $DORADO_DOWNLOAD_FILENAME. Exiting.";
+                rm -f "$DORADO_DOWNLOAD_FILENAME"
+                popd > /dev/null; exit 1
+            fi
+        else
+            echo "[ERROR] Downloaded Dorado file is empty or corrupted: $DORADO_DIR/$DORADO_DOWNLOAD_FILENAME. Exiting.";
+            rm -f "$DORADO_DOWNLOAD_FILENAME"
+            popd > /dev/null; exit 1
+        fi
     else
-        echo "[WARNING] Canu is installed but not version $CANU_VERSION (found $CURRENT_CANU_VERSION)."
-        read -p "Do you want to proceed with installing Canu v$CANU_VERSION? (y/n): " INSTALL_CHOICE
-        if [[ "$INSTALL_CHOICE" =~ ^[Yy]$ ]]; then
-            echo "[INSTALLATION] Downloading and installing Canu v$CANU_VERSION..."
-            CANU_INSTALL_DIR="$HOME/opt/canu"
-            mkdir -p "$CANU_INSTALL_DIR" || { echo "[ERROR] Failed to create directory $CANU_INSTALL_DIR for Canu. Exiting."; exit 1; }
-            if curl -L "https://github.com/marbl/canu/releases/download/v$CANU_VERSION/canu-$CANU_VERSION.tar.gz" | tar -xz -C "$CANU_INSTALL_DIR"; then
-                CANU_EXTRACTED_DIR="$CANU_INSTALL_DIR/canu-$CANU_VERSION"
-                if [[ ! -d "$CANU_EXTRACTED_DIR" ]]; then
-                    echo "[ERROR] Canu extracted directory not found at $CANU_EXTRACTED_DIR. Tar extraction might have failed. Exiting."
+        echo "[ERROR] Failed to download Dorado v$DORADO_VERSION from $DORADO_URL. Check network and URL. Exiting.";
+        popd > /dev/null; exit 1
+    fi
+    popd > /dev/null || { echo "[ERROR] Failed to return from Dorado installation directory. Exiting."; exit 1; }
+fi
+
+# Add Dorado to PATH if not already added
+if [[ ":$PATH:" != *":$DORADO_BIN:"* ]]; then
+    echo "[INFO] Adding Dorado to PATH in $SHELL_PROFILE"
+    {
+        echo ""
+        echo "# Added by Dorado installer"
+        echo "export PATH=\"\$PATH:$DORADO_BIN\""
+    } >> "$SHELL_PROFILE"
+    source "$SHELL_PROFILE" # Reload PATH for the current session
+    echo "[INFO] PATH updated for the current session."
+fi
+# Ensure it's active for the rest of the script.
+export PATH="$PATH:$DORADO_BIN"
+echo ""
+
+# === 2. kraken2_env ===
+echo "[2/9] Creating environment: kraken2_env"
+if ! conda env list | grep -q "kraken2_env"; then
+    conda create -y -n kraken2_env -c bioconda -c conda-forge kraken2 seqtk || \
+        { echo "[ERROR] Failed to create 'kraken2_env' Conda environment. Exiting."; exit 1; }
+else
+    echo "[INFO] Environment 'kraken2_env' already exists."
+fi
+echo "[INFO] Remember that Kraken2 requires a database. You will need to download it separately."
+echo "Example: 'conda activate kraken2_env' then 'kraken2-build --download-library bacteria --db /path/to/your_kraken_db'"
+echo "Or for a complete database: 'kraken2-build --download-taxonomy --db /path/to/your_kraken_db'"
+echo "[INFO] 'kraken2_env' setup complete."
+echo ""
+
+# === 3. assembly_env ===
+echo "[3/9] Creating environment: assembly_env"
+if ! conda env list | grep -q "assembly_env"; then
+    conda create -y -n assembly_env -c bioconda -c conda-forge \
+        flye wtdbg paralleltask openjdk=8 || \
+        { echo "[ERROR] Failed to create 'assembly_env' Conda environment. Exiting."; exit 1; }
+else
+    echo "[INFO] Environment 'assembly_env' already exists."
+fi
+echo "[INFO] 'assembly_env' setup complete."
+echo ""
+
+# === Canu install ===
+echo "[INFO] Installing Canu v2.2..."
+# Prompt for Canu installation directory
+read -p "Path to the directory where Canu should be installed (e.g., $HOME/opt): " CANU_DIR
+# Remove trailing slash if present
+CANU_DIR="${CANU_DIR%/}"
+
+CANU_VERSION="2.2"
+CANU_ARCHIVE="canu-$CANU_VERSION.Linux-amd64.tar.xz"
+CANU_URL="https://github.com/marbl/canu/releases/download/v$CANU_VERSION/$CANU_ARCHIVE"
+CANU_BIN="$CANU_DIR/canu-$CANU_VERSION/bin"
+CANU_DOWNLOAD_PATH="/tmp/$CANU_ARCHIVE" # Download to /tmp first
+
+if [[ -x "$CANU_BIN/canu" ]]; then
+    echo "[INFO] Canu is already installed in $CANU_BIN, skipping download."
+else
+    echo "[INSTALLATION] Attempting to install Canu v$CANU_VERSION..."
+    mkdir -p "$CANU_DIR" || { echo "[ERROR] Failed to create directory $CANU_DIR for Canu. Exiting."; exit 1; }
+    
+    echo "[INFO] Downloading Canu from $CANU_URL to $CANU_DOWNLOAD_PATH..."
+    if curl -fL "$CANU_URL" -o "$CANU_DOWNLOAD_PATH"; then
+        if [[ -s "$CANU_DOWNLOAD_PATH" ]]; then
+            echo "[INFO] Extracting Canu from $CANU_DOWNLOAD_PATH to $CANU_DIR..."
+            if tar -xJf "$CANU_DOWNLOAD_PATH" -C "$CANU_DIR"; then
+                rm -f "$CANU_DOWNLOAD_PATH" || echo "[WARNING] Failed to remove temporary Canu tarball: $CANU_DOWNLOAD_PATH"
+                if [[ -x "$CANU_BIN/canu" ]]; then
+                    echo "[INFO] Canu v$CANU_VERSION installed successfully."
+                    echo "[INFO] Canu version check: $("$CANU_BIN/canu" --version 2>&1)"
+                else
+                    echo "[ERROR] Canu executable not found at $CANU_BIN/canu after extraction. Please check the extracted directory structure. Exiting.";
                     exit 1
                 fi
-                CANU_BIN_PATH="$CANU_EXTRACTED_DIR/bin"
-                echo "export PATH=\"$CANU_BIN_PATH:\$PATH\"" >> "$SHELL_PROFILE"
-                source "$SHELL_PROFILE" # Reload PATH for current session
-                echo "[INFO] Canu v$CANU_VERSION installed in $CANU_BIN_PATH and added to PATH."
             else
-                echo "[ERROR] Failed to download or extract Canu v$CANU_VERSION. Check network and URL. Exiting."
+                echo "[ERROR] Failed to extract Canu from $CANU_DOWNLOAD_PATH. Exiting.";
+                rm -f "$CANU_DOWNLOAD_PATH"
                 exit 1
             fi
         else
-            echo "[INFO] Skipping Canu v$CANU_VERSION installation."
-        fi
-    fi
-else
-    echo "[INSTALLATION] Downloading and installing Canu v$CANU_VERSION..."
-    CANU_INSTALL_DIR="$HOME/opt/canu"
-    mkdir -p "$CANU_INSTALL_DIR" || { echo "[ERROR] Failed to create directory $CANU_INSTALL_DIR for Canu. Exiting."; exit 1; }
-    if curl -L "https://github.com/marbl/canu/releases/download/v$CANU_VERSION/canu-$CANU_VERSION.tar.gz" | tar -xz -C "$CANU_INSTALL_DIR"; then
-        CANU_EXTRACTED_DIR="$CANU_INSTALL_DIR/canu-$CANU_VERSION"
-        if [[ ! -d "$CANU_EXTRACTED_DIR" ]]; then
-            echo "[ERROR] Canu extracted directory not found at $CANU_EXTRACTED_DIR. Tar extraction might have failed. Exiting."
+            echo "[ERROR] Downloaded Canu file is empty or corrupted: $CANU_DOWNLOAD_PATH. Exiting.";
+            rm -f "$CANU_DOWNLOAD_PATH"
             exit 1
         fi
-        CANU_BIN_PATH="$CANU_EXTRACTED_DIR/bin"
-        echo "export PATH=\"$CANU_BIN_PATH:\$PATH\"" >> "$SHELL_PROFILE"
-        source "$SHELL_PROFILE" # Reload PATH for current session
-        echo "[INFO] Canu v$CANU_VERSION installed in $CANU_BIN_PATH and added to PATH."
     else
-        echo "[ERROR] Failed to download or extract Canu v$CANU_VERSION. Check network and URL. Exiting."
+        echo "[ERROR] Failed to download Canu v$CANU_VERSION from $CANU_URL. Check network and URL. Exiting.";
         exit 1
     fi
 fi
-conda deactivate || { echo "[ERROR] Failed to deactivate 'assembly_env'. Exiting."; exit 1; }
-echo ""
 
-# --- Environment: polishing_env (Script 3_asm_pol.sh, 4_hybrid.sh) ---
-echo "[5/8] Creating/Activating environment: polishing_env"
-if ! conda env list | grep -q "polishing_env"; then
-    echo "[INFO] Creating 'polishing_env'..."
-    conda create -y -n polishing_env -c bioconda -c conda-forge \
-        racon medaka bwa pilon || { echo "[ERROR] Failed to create 'polishing_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "Environment 'polishing_env' already exists. Activating..."
+if [[ ":$PATH:" != *":$CANU_BIN:"* ]]; then
+    echo "[INFO] Adding Canu to PATH in $SHELL_PROFILE"
+    {
+        echo ""
+        echo "# Added by Canu installer"
+        echo "export PATH=\"\$PATH:$CANU_BIN\""
+    } >> "$SHELL_PROFILE"
+    source "$SHELL_PROFILE" # Reload PATH for the current session
+    echo "[INFO] PATH updated for the current session."
 fi
-conda activate polishing_env || { echo "[ERROR] Failed to activate 'polishing_env' Conda environment. Exiting."; exit 1; }
-echo "[INFO] Environment 'polishing_env' activated."
-conda deactivate || { echo "[ERROR] Failed to deactivate 'polishing_env'. Exiting."; exit 1; }
+export PATH="$PATH:$CANU_BIN" # Ensure it's active for the rest of the script.
 echo ""
 
-# --- Installing Hifiasm (Manual Download) ---
-echo "[INSTALLATION] Hifiasm"
-HIFIASM_VERSION="0.19.8" # Verify the latest stable version
-HIFIASM_INSTALL_DIR="$HOME/opt/hifiasm"
-HIFIASM_BINARY_CONTENTS_DIR="$HIFIASM_INSTALL_DIR/hifiasm-$HIFIASM_VERSION-Linux" # The directory containing the hifiasm executable after extraction
+# === Hifiasm install ===
+echo "[INFO] Installing Hifiasm from source..."
+# Prompt for Hifiasm installation directory
+read -p "Path to the directory where Hifiasm should be installed (e.g., $HOME/opt): " HIFIASM_DIR
+# Remove trailing slash if present
+HIFIASM_DIR="${HIFIASM_DIR%/}"
 
-if ! command_exists hifiasm || [[ "$(hifiasm --version 2>&1 | grep -oP 'hifiasm v\K[0-9]+\.[0-9]+\.[0-9]+')" != "$HIFIASM_VERSION" ]]; then
-    echo "[INSTALLATION] Hifiasm v$HIFIASM_VERSION needs to be downloaded and installed."
-    echo "[INFO] Downloading and extracting Hifiasm to $HIFIASM_INSTALL_DIR..."
-    mkdir -p "$HIFIASM_INSTALL_DIR" || { echo "[ERROR] Failed to create directory $HIFIASM_INSTALL_DIR for Hifiasm. Exiting."; exit 1; }
-    if curl -L "https://github.com/chhylp123/hifiasm/releases/download/$HIFIASM_VERSION/hifiasm-$HIFIASM_VERSION-Linux.tar.gz" | tar -xz -C "$HIFIASM_INSTALL_DIR"; then
-        echo "[INFO] Hifiasm downloaded and extracted successfully."
-        if [[ ! -d "$HIFIASM_BINARY_CONTENTS_DIR" ]]; then
-            echo "[ERROR] Extracted Hifiasm directory not found at $HIFIASM_BINARY_CONTENTS_DIR. Tar extraction might have failed. Exiting."
-            exit 1
-        fi
-        echo "export PATH=\"$HIFIASM_BINARY_CONTENTS_DIR:\$PATH\"" >> "$SHELL_PROFILE"
-        source "$SHELL_PROFILE" # Reload PATH for current session
-        echo "[INFO] Hifiasm v$HIFIASM_VERSION installed and added to PATH. Please restart your terminal or 'source $SHELL_PROFILE' for changes to take full effect."
+HIFIASM_REPO="https://github.com/chhylp123/hifiasm.git"
+HIFIASM_CLONE_DIR="$HIFIASM_DIR/hifiasm"
+HIFIASM_BIN="$HIFIASM_CLONE_DIR/hifiasm"
+
+if [[ -x "$HIFIASM_BIN" ]]; then
+    echo "[INFO] Hifiasm is already installed in $HIFIASM_BIN, skipping build."
+else
+    echo "[INSTALLATION] Attempting to build Hifiasm from source..."
+    mkdir -p "$HIFIASM_DIR" || { echo "[ERROR] Failed to create directory $HIFIASM_DIR for Hifiasm. Exiting."; exit 1; }
+    
+    if [[ -d "$HIFIASM_CLONE_DIR" ]]; then
+        echo "[INFO] Hifiasm source directory already exists, pulling latest changes..."
+        pushd "$HIFIASM_CLONE_DIR" > /dev/null || { echo "[ERROR] Failed to enter directory $HIFIASM_CLONE_DIR. Exiting."; exit 1; }
+        git pull || { echo "[WARNING] Failed to pull latest Hifiasm changes. Proceeding with existing source."; }
+        popd > /dev/null || { echo "[ERROR] Failed to return from Hifiasm source directory. Exiting."; exit 1; }
     else
-        echo "[ERROR] Failed to download or extract Hifiasm v$HIFIASM_VERSION. Check network and URL. Exiting."
-        exit 1
+        echo "[INFO] Cloning Hifiasm repository from $HIFIASM_REPO to $HIFIASM_CLONE_DIR..."
+        git clone "$HIFIASM_REPO" "$HIFIASM_CLONE_DIR" || { echo "[ERROR] Failed to clone Hifiasm repository. Check git installation and network. Exiting."; exit 1; }
     fi
-else
-    echo "[INFO] Hifiasm v$HIFIASM_VERSION appears to be already installed and is the correct version."
-fi
-echo ""
 
-# --- Installing NextDenovo (Manual Download) ---
-echo "[INSTALLATION] NextDenovo"
-NEXTDENOVO_VERSION="2.5.0" # Verify the latest stable version
-NEXTDENOVO_INSTALL_DIR="$HOME/opt/nextdenovo"
-NEXTDENOVO_EXTRACTED_ROOT_DIR="$NEXTDENOVO_INSTALL_DIR/NextDenovo" # The root directory after unzipping
-NEXTDENOVO_BIN_PATH="$NEXTDENOVO_EXTRACTED_ROOT_DIR/bin" # The directory containing NextDenovo executable
-
-if ! command_exists NextDenovo; then
-    echo "[INSTALLATION] NextDenovo v$NEXTDENOVO_VERSION needs to be downloaded and installed."
-    echo "[INFO] Downloading and extracting NextDenovo to $NEXTDENOVO_INSTALL_DIR..."
-    mkdir -p "$NEXTDENOVO_INSTALL_DIR" || { echo "[ERROR] Failed to create directory $NEXTDENOVO_INSTALL_DIR for NextDenovo. Exiting."; exit 1; }
-    # Download to /tmp first, then unzip
-    TEMP_NEXTDENOVO_ZIP="/tmp/NextDenovo-$NEXTDENOVO_VERSION.zip"
-    if curl -L "https://github.com/NextDenovo/NextDenovo/releases/download/v$NEXTDENOVO_VERSION/NextDenovo.zip" -o "$TEMP_NEXTDENOVO_ZIP"; then
-        if unzip -q "$TEMP_NEXTDENOVO_ZIP" -d "$NEXTDENOVO_INSTALL_DIR"; then # -q for quiet unzip
-            echo "[INFO] NextDenovo downloaded and extracted successfully."
-            if [[ ! -d "$NEXTDENOVO_EXTRACTED_ROOT_DIR" ]]; then
-                echo "[ERROR] Extracted NextDenovo root directory not found. Expected at $NEXTDENOVO_EXTRACTED_ROOT_DIR. Unzip might have failed. Exiting."
-                exit 1
-            fi
-            echo "export PATH=\"$NEXTDENOVO_BIN_PATH:\$PATH\"" >> "$SHELL_PROFILE"
-            source "$SHELL_PROFILE" # Reload PATH for current session
-            echo "[INFO] NextDenovo v$NEXTDENOVO_VERSION installed and added to PATH. Please restart your terminal or 'source $SHELL_PROFILE' for changes to take full effect."
-        else
-            echo "[ERROR] Failed to unzip NextDenovo v$NEXTDENOVO_VERSION. Check zip file integrity. Exiting."
-            exit 1
-        fi
-        rm "$TEMP_NEXTDENOVO_ZIP" # Clean up downloaded zip
+    pushd "$HIFIASM_CLONE_DIR" > /dev/null || { echo "[ERROR] Failed to enter Hifiasm source directory for compilation. Exiting."; exit 1; }
+    echo "[INFO] Compiling Hifiasm. This might take a few minutes..."
+    echo "[WARNING] Compiling Hifiasm requires 'make' and a C/C++ compiler (e.g., gcc)."
+    echo "[WARNING] If you encounter errors, ensure 'build-essential' is installed on your system (e.g., sudo apt install build-essential)."
+    make -j$(nproc) || { echo "[ERROR] Hifiasm compilation failed. Exiting."; popd > /dev/null; exit 1; }
+    
+    if [[ -x "$HIFIASM_BIN" ]]; then
+        echo "[INFO] Hifiasm built successfully."
+        echo "[INFO] Hifiasm version check: $("$HIFIASM_BIN" --version 2>&1)"
     else
-        echo "[ERROR] Failed to download NextDenovo v$NEXTDENOVO_VERSION. Check network and URL. Exiting."
-        exit 1
+        echo "[ERROR] Hifiasm executable not found at $HIFIASM_BIN after compilation. Exiting.";
+        popd > /dev/null; exit 1
     fi
-else
-    echo "[INFO] NextDenovo appears to be already installed."
+    popd > /dev/null || { echo "[ERROR] Failed to return from Hifiasm source directory. Exiting."; exit 1; }
 fi
+
+HIFIASM_PATH_DIR="$(dirname "$HIFIASM_BIN")"
+if [[ ":$PATH:" != *":$HIFIASM_PATH_DIR:"* ]]; then
+    echo "[INFO] Adding Hifiasm to PATH in $SHELL_PROFILE"
+    {
+        echo ""
+        echo "# Added by Hifiasm installer"
+        echo "export PATH=\"\$PATH:$HIFIASM_PATH_DIR\""
+    } >> "$SHELL_PROFILE"
+    source "$SHELL_PROFILE" # Reload PATH for the current session
+    echo "[INFO] PATH updated for the current session."
+fi
+export PATH="$PATH:$HIFIASM_PATH_DIR" # Ensure it's active for the rest of the script.
 echo ""
 
-# --- Environment: ndn_env (Script 3_asm_pol.sh) - Likely redundant if NextDenovo is standalone ---
-echo "[6/8] Creating/Activating environment: ndn_env (for script compatibility, if NextDenovo has no Conda dependencies)"
+# === 4. ndn_env (NextDenovo) ===
+echo "[4/9] Creating environment: ndn_env (NextDenovo)"
+# Updated to create environment with minimap2 and samtools directly
 if ! conda env list | grep -q "ndn_env"; then
-    echo "[INFO] Creating 'ndn_env'..."
-    conda create -y -n ndn_env python=3.9 || { echo "[ERROR] Failed to create 'ndn_env' Conda environment. Exiting."; exit 1; }
+    echo "[INFO] Creating 'ndn_env' with NextDenovo dependencies (minimap2, samtools)..."
+    conda create -y -n ndn_env python=3.10 -c bioconda -c conda-forge minimap2 samtools || \
+        { echo "[ERROR] Failed to create 'ndn_env' Conda environment with dependencies. This might be due to conflicts with a global python pin (e.g., python=3.12). Exiting."; exit 1; }
 else
-    echo "Environment 'ndn_env' already exists. Activating..."
+    echo "[INFO] Environment 'ndn_env' already exists."
 fi
-conda activate ndn_env || { echo "[ERROR] Failed to activate 'ndn_env' Conda environment. Exiting."; exit 1; }
-echo "[INFO] Environment 'ndn_env' activated."
-conda deactivate || { echo "[ERROR] Failed to deactivate 'ndn_env'. Exiting."; exit 1; }
-echo ""
 
-# --- Environment: canu_env (Script 3_asm_pol.sh) ---
-echo "[7/8] Creating/Activating environment: canu_env (for script compatibility, if Canu has no Conda dependencies)"
-if ! conda env list | grep -q "canu_env"; then
-    echo "[INFO] Creating 'canu_env'..."
-    conda create -y -n canu_env python=3.9 || { echo "[ERROR] Failed to create 'canu_env' Conda environment. Exiting."; exit 1; }
+# The following blocks for activating/installing dependencies are now redundant for minimap2, samtools
+# as they are included in the conda create statement above.
+# conda activate ndn_env || { echo "[ERROR] Failed to activate 'ndn_env'. Exiting."; exit 1; }
+# echo "[INFO] Installing NextDenovo dependencies (minimap2, samtools) in 'ndn_env'..."
+# conda install -y -c bioconda minimap2 samtools || \
+#     { echo "[ERROR] Failed to install NextDenovo dependencies in 'ndn_env'. Exiting."; exit 1; }
+# conda deactivate || { echo "[ERROR] Failed to deactivate 'ndn_env'. Exiting."; exit 1; }
+echo "[INFO] NextDenovo dependencies setup handled during environment creation."
+
+echo "[INFO] Cloning and setting up NextDenovo..."
+# Prompt for NextDenovo installation directory
+read -p "Path to the directory where NextDenovo should be installed (e.g., $HOME/opt): " NDN_DIR
+# Remove trailing slash if present
+NDN_DIR="${NDN_DIR%/}"
+
+NEXTDENOVO_REPO="https://github.com/Nextomics/NextDenovo.git"
+NEXTDENOVO_CLONE_DIR="$NDN_DIR/NextDenovo"
+NDN_BIN="$NEXTDENOVO_CLONE_DIR/nextDenovo"
+
+if [[ -f "$NDN_BIN" ]]; then # Check if the script file exists
+    echo "[INFO] NextDenovo is already installed in $NDN_BIN, skipping clone."
 else
-    echo "Environment 'canu_env' already exists. Activating..."
-fi
-conda activate canu_env || { echo "[ERROR] Failed to activate 'canu_env' Conda environment. Exiting."; exit 1; }
-echo "[INFO] Environment 'canu_env' activated."
-conda deactivate || { echo "[ERROR] Failed to deactivate 'canu_env'. Exiting."; exit 1; }
-echo ""
-
-# --- Environment: fasta3_env (Script 10_extract_align.sh, 11_nuctoaa.sh) ---
-echo "[8/8] Creating/Activating environment: fasta3_env"
-if ! conda env list | grep -q "fasta3_env"; then
-    echo "[INFO] Creating 'fasta3_env'..."
-    conda create -y -n fasta3_env python=3.9 || { echo "[ERROR] Failed to create 'fasta3_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "Environment 'fasta3_env' already exists. Activating..."
-fi
-conda activate fasta3_env || { echo "[ERROR] Failed to activate 'fasta3_env' Conda environment. Exiting."; exit 1; }
-echo "[INFO] Environment 'fasta3_env' activated."
-conda deactivate || { echo "[ERROR] Failed to deactivate 'fasta3_env'. Exiting."; exit 1; }
-echo ""
-
-
-# --- Installing additional Python packages (for 7_rbh_lists.py, 8_extraction_fastagenes.py, 9_masking.py) ---
-echo ""
-echo "--- Installing Additional Python Packages ---"
-echo "Installing pandas and Biopython into the 'base' Conda environment (or an environment of your choice)."
-echo "These are required for Python scripts 7_rbh_lists.py, 8_extraction_fastagenes.py, and 9_masking.py."
-
-read -p "Do you want to install pandas and Biopython into the 'base' Conda environment? (y/n): " INSTALL_PYTHON_LIBS
-if [[ "$INSTALL_PYTHON_LIBS" =~ ^[Yy]$ ]]; then
-    conda activate base || { echo "[ERROR] Failed to activate 'base' environment for Python packages. Exiting."; exit 1; }
-    pip install pandas biopython || { echo "[ERROR] Failed to install pandas or biopython. Check network and pip. Exiting."; exit 1; }
-    conda deactivate || { echo "[ERROR] Failed to deactivate 'base' environment after Python package installation. Exiting."; exit 1; }
-    echo "[INFO] pandas and biopython installed in the 'base' environment."
-else
-    echo "[INFO] Skipping installation of pandas and biopython. Ensure they are available in the environment where you run your Python scripts."
-fi
-echo ""
-
-# --- Installing FASTA package (for glsearch36 in 6_rbh.sh and 10_extract_align.sh, and fasty36 in 11_nuctoaa.sh) ---
-echo "[INSTALLATION] FASTA package (for glsearch36 and fasty36)"
-if ! command_exists glsearch36 || ! command_exists fasty36; then
-    read -p "Do you want to install the FASTA package (which includes glsearch36 and fasty36)? (y/n): " INSTALL_FASTA_PKG
-    if [[ "$INSTALL_FASTA_PKG" =~ ^[Yy]$ ]]; then
-        echo "[WARNING] Compiling FASTA package requires 'make' and a C/C++ compiler (e.g., gcc)."
-        echo "[WARNING] If you encounter errors, ensure 'build-essential' is installed on your system (e.g., sudo apt install build-essential)."
-        echo "[INFO] Downloading FASTA package (v36.3.8g, recommended version)..."
-        FASTA_VERSION="36.3.8g"
-        FASTA_DIR="$HOME/opt/fasta_package"
-        mkdir -p "$FASTA_DIR" || { echo "[ERROR] Failed to create directory $FASTA_DIR for FASTA package. Exiting."; exit 1; }
-
-        # Use curl to download and pipe to tar for extraction
-        if curl -L "https://fasta.bioch.virginia.edu/fasta_tf/fasta-$FASTA_VERSION.tar.gz" | tar -xz -C "$FASTA_DIR"; then
-            echo "[INFO] Compiling FASTA package. This might take a few minutes..."
-            FASTA_SRC_DIR="$FASTA_DIR/fasta-$FASTA_VERSION/src"
-            if [[ ! -d "$FASTA_SRC_DIR" ]]; then
-                echo "[ERROR] FASTA package source directory not found at $FASTA_SRC_DIR. Tar extraction might have failed. Exiting."
-                exit 1
-            fi
-            pushd "$FASTA_SRC_DIR" > /dev/null || { echo "[ERROR] Failed to enter FASTA src directory for compilation. Exiting."; exit 1; }
-            make -f ../make/Makefile.linux64 || { echo "[ERROR] FASTA compilation failed. Please ensure 'make' and a C/C++ compiler (like 'gcc') are installed. Try installing 'build-essential' on Debian/Ubuntu systems. Exiting."; popd > /dev/null; exit 1; }
-            popd > /dev/null || { echo "[ERROR] Failed to return from FASTA src directory. Exiting."; exit 1; }
-
-            FASTA_BIN_PATH="$FASTA_DIR/fasta-$FASTA_VERSION/bin"
-            echo "export PATH=\"$FASTA_BIN_PATH:\$PATH\"" >> "$SHELL_PROFILE"
-            source "$SHELL_PROFILE" # Reload PATH for current session
-            echo "[INFO] glsearch36 and fasty36 binaries installed and added to PATH."
-        else
-            echo "[ERROR] Failed to download or extract FASTA package v$FASTA_VERSION. Check network and URL. Exiting."
-            exit 1
-        fi
+    echo "[INSTALLATION] Attempting to clone NextDenovo..."
+    mkdir -p "$NDN_DIR" || { echo "[ERROR] Failed to create directory $NDN_DIR for NextDenovo. Exiting."; exit 1; }
+    
+    if [[ -d "$NEXTDENOVO_CLONE_DIR" ]]; then
+        echo "[INFO] NextDenovo source directory already exists, pulling latest changes..."
+        pushd "$NEXTDENOVO_CLONE_DIR" > /dev/null || { echo "[ERROR] Failed to enter directory $NEXTDENOVO_CLONE_DIR. Exiting."; exit 1; }
+        git pull || { echo "[WARNING] Failed to pull latest NextDenovo changes. Proceeding with existing source."; }
+        popd > /dev/null || { echo "[ERROR] Failed to return from NextDenovo source directory. Exiting."; exit 1; }
     else
-        echo "[WARNING] glsearch36 and fasty36 will not be installed automatically. You will need to install them manually to run 6_rbh.sh, 10_extract_align.sh and 11_nuctoaa.sh."
+        echo "[INFO] Cloning NextDenovo repository from $NEXTDENOVO_REPO to $NEXTDENOVO_CLONE_DIR..."
+        git clone "$NEXTDENOVO_REPO" "$NEXTDENOVO_CLONE_DIR" || { echo "[ERROR] Failed to clone NextDenovo repository. Check git installation and network. Exiting."; exit 1; }
     fi
-else
-    echo "[INFO] glsearch36 and fasty36 appear to be already installed."
+    
+    if [[ -f "$NDN_BIN" ]]; then
+        echo "[INFO] NextDenovo cloned successfully."
+    else
+        echo "[ERROR] NextDenovo script not found at $NDN_BIN after cloning. Exiting.";
+        exit 1
+    fi
 fi
+
+NDN_LIB_PATH="$NEXTDENOVO_CLONE_DIR/lib"
+if [[ ":$PYTHONPATH:" != *":$NDN_LIB_PATH:"* ]]; then
+    echo "[INFO] Adding NextDenovo's paralleltask lib to PYTHONPATH in $SHELL_PROFILE"
+    {
+        echo ""
+        echo "# Added by NextDenovo installer"
+        echo "export PYTHONPATH=\"\$PYTHONPATH:$NDN_LIB_PATH\""
+        echo "alias nextdenovo='python $NDN_BIN'"
+    } >> "$SHELL_PROFILE"
+    source "$SHELL_PROFILE" # Reload environment variables for the current session
+    echo "[INFO] PYTHONPATH and 'nextdenovo' alias updated for the current session."
+fi
+
+# Apply changes to current session
+export PYTHONPATH="$PYTHONPATH:$NDN_LIB_PATH"
+# Note: Aliases cannot be directly exported for child processes.
+# The `source` command above makes it available in the current shell.
+# For new terminal sessions, the .bashrc change will apply.
+alias nextdenovo="python $NDN_BIN"
+echo "[INFO] 'ndn_env' and NextDenovo setup complete."
+echo ""
+
+# === 5. polishing_env ===
+echo "[5/9] Creating environment: polishing_env"
+if ! conda env list | grep -q "polishing_env"; then
+    conda create -y -n polishing_env -c bioconda -c nanoporetech -c conda-forge \
+        medaka racon quast || \
+        { echo "[ERROR] Failed to create 'polishing_env' Conda environment. Exiting."; exit 1; }
+else
+    echo "[INFO] Environment 'polishing_env' already exists."
+fi
+echo "[INFO] 'polishing_env' setup complete."
+echo ""
+
+# === 6. qc_env ===
+echo "[6/9] Creating environment: qc_env"
+if ! conda env list | grep -q "qc_env"; then
+    conda create -y -n qc_env -c bioconda -c conda-forge \
+        nanoplot fastqc qualimap bcftools samtools || \
+        { echo "[ERROR] Failed to create 'qc_env' Conda environment. Exiting."; exit 1; }
+else
+    echo "[INFO] Environment 'qc_env' already exists."
+fi
+echo "[INFO] 'qc_env' setup complete."
+echo ""
+
+# === 7. illuminareads_env ===
+echo "[7/9] Creating environment: illuminareads_env"
+if ! conda env list | grep -q "illuminareads_env"; then
+    conda create -y -n illuminareads_env -c bioconda -c conda-forge \
+        bwa pilon freebayes || \
+        { echo "[ERROR] Failed to create 'illuminareads_env' Conda environment. Exiting."; exit 1; }
+else
+    echo "[INFO] Environment 'illuminareads_env' already exists."
+fi
+echo "[INFO] 'illuminareads_env' setup complete."
+echo ""
+
+# === 8. mummer_env ===
+echo "[8/9] Creating environment: mummer_env"
+if ! conda env list | grep -q "mummer_env"; then
+    conda create -y -n mummer_env -c bioconda -c conda-forge \
+        mummer bedtools blast || \
+        { echo "[ERROR] Failed to create 'mummer_env' Conda environment. Exiting."; exit 1; }
+else
+    echo "[INFO] Environment 'mummer_env' already exists."
+fi
+echo "[INFO] 'mummer_env' setup complete."
+echo ""
+
+# === 9. fasta3_env ===
+echo "[9/9] Creating environment: fasta3_env"
+if ! conda env list | grep -q "fasta3_env"; then
+    conda create -y -n fasta3_env -c conda-forge -c bioconda \
+        pandas openpyxl biopython fasta3 || \
+        { echo "[ERROR] Failed to create 'fasta3_env' Conda environment. Exiting."; exit 1; }
+else
+    echo "[INFO] Environment 'fasta3_env' already exists."
+fi
+echo "[INFO] 'fasta3_env' setup complete."
 echo ""
 
 echo "#####################################################"
-echo "#           SETUP COMPLETE!                         #"
+echo "#           SETUP COMPLETE!                       #"
 echo "#####################################################"
-echo "For manual installations (Hifiasm, NextDenovo, and FASTA package if not automatically compiled),"
-echo "ensure that their binaries are in your PATH. You might need to restart your terminal or"
-echo "run 'source $SHELL_PROFILE' to ensure all PATH changes are active."
+echo "All specified Conda environments have been created or verified."
+echo "Manually installed tools (Dorado, Canu, Hifiasm, NextDenovo) should be in your PATH/PYTHONPATH."
+echo "Please remember to restart your terminal or run 'source $SHELL_PROFILE' "
+echo "to ensure all PATH and PYTHONPATH changes are active in new sessions."
 echo ""
 echo "Good luck with your work!"
