@@ -40,7 +40,8 @@ should_run_step() {
 }
 
 # ---
-
+echo "--- Variant calling script ---"
+echo "------------------------------"
 # === USER INPUT ===
 # Prompt the user for necessary file paths and parameters.
 read -r -p "Enter the path to the reference genome FASTA file: " REFERENCE
@@ -177,8 +178,8 @@ fi
 
 # ---
 
-echo ""
-echo "[DONE] De novo vs reference comparison pipeline completed successfully."
+echo "-----------------------------------------------------------------"
+echo " De novo vs reference comparison pipeline completed successfully."
 echo "--- Key comparison outputs ---"
 echo "-> Structural differences (MUMmer plots and coordinates): $OUTDIR/aln_mummer/"
 if [[ "$PERFORM_ANNOTATION" == "y" ]]; then
