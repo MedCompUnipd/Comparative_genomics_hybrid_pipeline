@@ -2,192 +2,194 @@
 set -euo pipefail
 shopt -s nullglob
 
-# === SAVE ORIGINAL DIRECTORY ===
-ORIG_PWD="$(pwd)"
-# Trap errors to return to original directory and exit cleanly on failure
-trap 'cd "$ORIG_PWD" || exit; echo "[ERROR] Script interrupted or failed. Exiting."; exit 1' ERR
-
-# --- Conda setup ---
-# Function to check if a command exists
-command_exists () {
-    command -v "$1" &> /dev/null
-}
-
-if ! command_exists conda; then
-  echo "[ERROR] Conda not found. Please ensure conda is installed and initialized."
+# === LOAD CONDA (portable) ===
+# Verify Conda installation and initialize it.
+if ! command -v conda &> /dev/null; then
+  echo "[ERROR] Conda non trovato. Assicurati che conda sia installato e inizializzato."
   exit 1
 fi
 eval "$(conda shell.bash hook)"
 
-echo "--- De Novo Assembly to Reference Comparison Script ---"
-echo "-----------------------------------------------------"
+# ---
 
 # === FUNCTION: Check if step should run ===
-# This function checks if an output file or directory already exists for a given step.
+# This function checks if an output file already exists for a given step.
 # If it exists, it asks the user whether to skip the step or overwrite it.
 should_run_step() {
   local output_check="$1"
   local step_name="$2"
-  local choice=""
+  local step_dir
+  step_dir=$(dirname "$output_check")
 
   if [[ -e "$output_check" ]]; then
-    echo "[INFO] Output for '$step_name' already exists at: $output_check"
-    read -r -p "Do you want to skip this step? (y to skip / n to overwrite): " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-      echo "[INFO] Skipping $step_name..."
+    echo "[INFO] L'output per '$step_name' esiste già in: $output_check"
+    read -r -p "Vuoi saltare questo passaggio? (s per saltare / n per sovrascrivere): " choice
+    if [[ "$choice" =~ ^[Ss]$ ]]; then
+      echo "[INFO] Salto di $step_name..."
       return 1 # Skip the step
     else
-      echo "[INFO] Overwriting $step_name: removing $output_check..."
-      rm -rf "$output_check" # Remove the conflicting output
+      echo "[INFO] Sovrascrittura di $step_name: rimozione di $step_dir..."
+      rm -rf "$step_dir"
+      mkdir -p "$step_dir"
       return 0
     fi
   else
+    mkdir -p "$step_dir"
     return 0
   fi
 }
 
+# ---
+
 # === USER INPUT ===
-read -r -p "Enter path to the de novo assembly FASTA file (e.g., polished.fasta): " DENOVO_ASSEMBLY
-read -r -p "Enter path to the reference genome FASTA file: " REFERENCE_GENOME
-read -r -p "Enter path to the reference genome GFF/GTF file (for annotation, optional): " REF_GFF
-read -r -p "Enter desired output directory for comparison results: " OUTPUT_DIR
-read -r -p "Enter threads to use: " THREADS
+# Prompt the user for necessary file paths and parameters.
+read -r -p "Inserisci il percorso del file FASTA del genoma di riferimento: " REFERENCE
+read -r -p "Inserisci il percorso del file FASTA del genoma de novo (il tuo assemblaggio pulito): " DENOVO_GENOME
+read -r -p "Inserisci il percorso della directory di output desiderata: " OUTDIR
+read -r -p "Inserisci il numero di thread da utilizzare: " THREADS
 
-# --- Validate Inputs ---
-if [[ ! -f "$DENOVO_ASSEMBLY" ]]; then
-    echo "[ERROR] De novo assembly FASTA not found: $DENOVO_ASSEMBLY. Exiting."
-    exit 1
-fi
-if [[ ! -f "$REFERENCE_GENOME" ]]; then
-    echo "[ERROR] Reference genome FASTA not found: $REFERENCE_GENOME. Exiting."
-    exit 1
-fi
-mkdir -p "$OUTPUT_DIR" || { echo "[ERROR] Failed to create output directory: $OUTPUT_DIR"; exit 1; }
-
-# === CONDA ENVIRONMENT NAMES ===
-QC_ENV="qc_env"
-
-# --- MAIN WORKFLOW ---
-echo ""
-echo "--- Starting Comparison Pipeline ---"
-
-# === STEP 1: QUAST Comparison ===
-QUAST_COMP_DIR="${OUTPUT_DIR}/quast_comparison"
-if should_run_step "$QUAST_COMP_DIR/report.html" "QUAST Comparison"; then
-  echo "[1/3] Running QUAST comparison..."
-  mkdir -p "$QUAST_COMP_DIR"
-  conda activate "$QC_ENV" || { echo "[ERROR] Failed to activate 'qc_env'. Please check your Conda environments."; exit 1; }
-  quast.py -r "$REFERENCE_GENOME" -t "$THREADS" -o "$QUAST_COMP_DIR" "$DENOVO_ASSEMBLY" || { echo "[ERROR] QUAST comparison failed."; exit 1; }
-  echo "[INFO] QUAST comparison completed. Reports in $QUAST_COMP_DIR"
-  conda deactivate
+# ---
+# Conditional annotation input
+PERFORM_ANNOTATION="n" # Default to no annotation
+read -r -p "Vuoi eseguire l'annotazione delle varianti? (s/n): " ANNOTATION_CHOICE
+if [[ "$ANNOTATION_CHOICE" =~ ^[Ss]$ ]]; then
+  PERFORM_ANNOTATION="y"
+  read -r -p "Inserisci il percorso del file GFF3 di annotazione (verrà usato da bcftools csq): " GFF
+  echo "[SUGGERIMENTO] Per il file GFF3, puoi cercarlo nel database EMBL-EBI tramite ENA (https://www.ebi.ac.uk/ena/). Cerca il numero di accesso del tuo genoma di riferimento e scarica il file in formato GFF3."
 else
-  echo "[1/3] Skipping QUAST Comparison."
+  echo "[INFO] L'annotazione delle varianti verrà saltata."
+  # Set dummy value for GFF if annotation is skipped
+  GFF=""
 fi
 
-# === STEP 2: MUMmer Alignment and Plotting ===
-MUMMER_ALIGN_DIR="${OUTPUT_DIR}/aln_mummer"
-if should_run_step "$MUMMER_ALIGN_DIR" "MUMmer Alignment and Plotting"; then
-  echo "[2/3] Running MUMmer alignment and plotting..."
-  mkdir -p "$MUMMER_ALIGN_DIR"
-  conda activate "$QC_ENV" || { echo "[ERROR] Failed to activate 'qc_env'. Please check your Conda environments."; exit 1; }
+# ---
 
-  # 1. Run nucmer
-  echo "[INFO] Running nucmer..."
-  nucmer --prefix="${MUMMER_ALIGN_DIR}/denovo_vs_ref" "$REFERENCE_GENOME" "$DENOVO_ASSEMBLY" || { echo "[ERROR] nucmer failed."; exit 1; }
+# === CHECK FILES ===
+# Verify that all input files exist before proceeding.
+REQUIRED_FILES=("$REFERENCE" "$DENOVO_GENOME")
+if [[ "$PERFORM_ANNOTATION" == "y" ]]; then
+  REQUIRED_FILES+=("$GFF")
+fi
 
-  # 2. Filter alignments
-  echo "[INFO] Filtering delta file with delta-filter..."
-  delta-filter -q "${MUMMER_ALIGN_DIR}/denovo_vs_ref.delta" > "${MUMMER_ALIGN_DIR}/denovo_vs_ref.filtered.delta" || { echo "[ERROR] delta-filter failed."; exit 1; }
+for FILE in "${REQUIRED_FILES[@]}"; do
+  [[ -f "$FILE" ]] || { echo "[ERROR] Input mancante: $FILE"; exit 1; }
+done
+# Create the main output directory.
+mkdir -p "$OUTDIR"
+echo "[INFO] Avvio della pipeline di confronto tra il tuo assemblaggio de novo pulito ($DENOVO_GENOME) e il riferimento ($REFERENCE)."
 
-  # 3. Generate alignment coordinates
-  echo "[INFO] Generating alignment coordinates with show-coords..."
-  show-coords -r -c -l -T "${MUMMER_ALIGN_DIR}/denovo_vs_ref.filtered.delta" > "${MUMMER_ALIGN_DIR}/denovo_vs_ref.coords" || { echo "[ERROR] show-coords failed."; exit 1; }
+# ---
 
-  # 4. Generate plots (requires gnuplot, which is usually a system dependency)
-  echo "[INFO] Generating alignment plots with mummerplot..."
-  # Check if gnuplot is available
-  if ! command_exists gnuplot; then
-      echo "[WARNING] 'gnuplot' not found. MUMmer plots cannot be generated. Please install gnuplot manually (e.g., sudo apt install gnuplot)."
+# === STEP 0: MUMmer Comparison ===
+# This step compares the large-scale structure of your polished de novo genome with the reference genome.
+# Useful for identifying large rearrangements, inversions, or translocations.
+MUMMER_OUTPUT_CHECK="$OUTDIR/aln_mummer/ref_vs_denovo.coords"
+if should_run_step "$MUMMER_OUTPUT_CHECK" "MUMmer Comparison"; then
+  echo "[0] Esecuzione del confronto MUMmer (riferimento vs tuo assemblaggio de novo)..."
+  # mkdir -p "$OUTDIR/aln_mummer" # Handled by should_run_step
+  conda activate mummer_env || { echo "[ERROR] Impossibile attivare 'mummer_env'. Controlla i tuoi ambienti Conda."; exit 1; }
+  nucmer --prefix="$OUTDIR/aln_mummer/ref_vs_denovo" "$REFERENCE" "$DENOVO_GENOME" || { echo "[ERROR] nucmer fallito."; exit 1; }
+  delta-filter -1 "$OUTDIR/aln_mummer/ref_vs_denovo.delta" > "$OUTDIR/aln_mummer/ref_vs_denovo.filtered.delta" || { echo "[ERROR] delta-filter fallito."; exit 1; }
+  show-coords -rcl "$OUTDIR/aln_mummer/ref_vs_denovo.filtered.delta" > "$OUTDIR/aln_mummer/ref_vs_denovo.coords" || { echo "[ERROR] show-coords fallito."; exit 1; }
+  
+  # Check if gnuplot is available before trying mummerplot
+  if ! command -v gnuplot &> /dev/null; then
+      echo "[WARNING] 'gnuplot' non trovato. I grafici MUMmer non possono essere generati. Installa gnuplot manualmente (es. sudo apt install gnuplot)."
   else
-      # Using -fatb for larger dots, -x and -y for axis ranges from assembly sizes if known
-      mummerplot --postscript --prefix="${MUMMER_ALIGN_DIR}/denovo_vs_ref" -p "${MUMMER_ALIGN_DIR}/denovo_vs_ref" "${MUMMER_ALIGN_DIR}/denovo_vs_ref.filtered.delta" || { echo "[ERROR] mummerplot failed."; } # mummerplot often fails gracefully
-      # Convert PostScript to PDF for easier viewing
-      if [[ -f "${MUMMER_ALIGN_DIR}/denovo_vs_ref.ps" ]]; then
-          echo "[INFO] Converting PostScript plot to PDF..."
-          ps2pdf "${MUMMER_ALIGN_DIR}/denovo_vs_ref.ps" "${MUMMER_ALIGN_DIR}/denovo_vs_ref.pdf" || echo "[WARNING] ps2pdf conversion failed. PDF plot might not be generated."
-      fi
+      mummerplot --png --layout --prefix "$OUTDIR/aln_mummer/ref_vs_denovo" "$OUTDIR/aln_mummer/ref_vs_denovo.filtered.delta" || { echo "[ERROR] mummerplot fallito."; } # mummerplot often fails gracefully
   fi
-  echo "[INFO] MUMmer alignment completed. Outputs in $MUMMER_ALIGN_DIR"
+  
   conda deactivate
+  echo "[INFO] I risultati del confronto MUMmer si trovano in $OUTDIR/aln_mummer/"
 else
-  echo "[2/3] Skipping MUMmer Alignment and Plotting."
+  echo "[0] Salto del confronto MUMmer."
 fi
 
-# === STEP 3: Variant Calling with BCFtools and Annotation ===
-BCFTOOLS_VARIANT_DIR="${OUTPUT_DIR}/variant_calling_bcftools"
-if should_run_step "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered_annotated_bcftools.vcf" "BCFtools Variant Calling and Annotation"; then
-  echo "[3/3] Running BCFtools variant calling and optional annotation..."
-  mkdir -p "$BCFTOOLS_VARIANT_DIR"
-  conda activate "$QC_ENV" || { echo "[ERROR] Failed to activate 'qc_env'. Please check your Conda environments."; exit 1; }
+# ---
 
-  # 1. Index reference genome for BWA if not already done
-  if [[ ! -f "$REFERENCE_GENOME.fai" ]]; then
-      echo "[INFO] Indexing reference genome for BWA (required for BCFtools mpileup)..."
-      bwa index "$REFERENCE_GENOME" || { echo "[ERROR] BWA indexing of reference failed."; exit 1; }
-  fi
+# === STEP 1: Variant Calling (De novo assembly vs Reference) using BCFtools ===
+# This step identifies single nucleotide variants (SNPs) and small Indels between your polished de novo genome
+# and the reference genome using BCFtools.
+BCFTOOLS_VCF_OUTPUT="$OUTDIR/variant_calling_bcftools/denovo_vs_ref.vcf.gz"
+if should_run_step "$BCFTOOLS_VCF_OUTPUT" "BCFtools-based Variant Calling (De novo vs Ref)"; then
+  echo "[1] Chiamata delle varianti dal tuo assemblaggio de novo vs riferimento usando BCFtools..."
+  # mkdir -p "$OUTDIR/variant_calling_bcftools" # Handled by should_run_step
 
-  # 2. Map de novo assembly to reference using BWA-MEM
-  echo "[INFO] Mapping de novo assembly to reference with BWA-MEM..."
-  local BWA_BAM="${BCFTOOLS_VARIANT_DIR}/denovo_vs_ref.bam"
-  bwa mem -t "$THREADS" "$REFERENCE_GENOME" "$DENOVO_ASSEMBLY" | samtools view -Sb - | samtools sort -o "$BWA_BAM" - || { echo "[ERROR] BWA mapping/Samtools sort failed."; exit 1; }
-  samtools index "$BWA_BAM" || { echo "[ERROR] Samtools indexing failed."; exit 1; }
+  conda activate preprocessing_env || { echo "[ERROR] Impossibile attivare 'preprocessing_env'. Controlla i tuoi ambienti Conda."; exit 1; }
+  minimap2 -ax asm5 "$REFERENCE" "$DENOVO_GENOME" > "$OUTDIR/variant_calling_bcftools/aln.sam" || { echo "[ERROR] minimap2 fallito."; exit 1; }
+  conda deactivate
 
-  # 3. Call variants with bcftools mpileup and call
-  echo "[INFO] Calling variants with BCFtools mpileup and call..."
-  bcftools mpileup -f "$REFERENCE_GENOME" "$BWA_BAM" | bcftools call -mv -o "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref.vcf" || { echo "[ERROR] BCFtools mpileup/call failed."; exit 1; }
-  echo "[INFO] Variants called: $BCFTOOLS_VARIANT_DIR/denovo_vs_ref.vcf"
+  conda activate qc_env || { echo "[ERROR] Impossibile attivare 'qc_env'. Controlla i tuoi ambienti Conda."; exit 1; }
+  samtools sort -@ "$THREADS" -o "$OUTDIR/variant_calling_bcftools/aln.sorted.bam" "$OUTDIR/variant_calling_bcftools/aln.sam" || { echo "[ERROR] samtools sort fallito."; exit 1; }
+  samtools index "$OUTDIR/variant_calling_bcftools/aln.sorted.bam" || { echo "[ERROR] samtools index fallito."; exit 1; }
+  rm "$OUTDIR/variant_calling_bcftools/aln.sam"
 
-  # 4. Filter variants (e.g., remove low quality)
-  echo "[INFO] Filtering variants..."
-  bcftools view -f PASS "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref.vcf" | bcftools norm -d all -f "$REFERENCE_GENOME" -o "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered.vcf" || { echo "[ERROR] BCFtools filtering failed."; exit 1; }
-  bgzip -f "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered.vcf" || { echo "[ERROR] bgzip failed."; exit 1; }
-  tabix -p vcf "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered.vcf.gz" || { echo "[ERROR] tabix failed."; exit 1; }
-  echo "[INFO] Filtered variants: $BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered.vcf.gz"
+  bcftools mpileup -Ou -f "$REFERENCE" "$OUTDIR/variant_calling_bcftools/aln.sorted.bam" | \
+    bcftools call -mv -Oz -o "$BCFTOOLS_VCF_OUTPUT" || { echo "[ERROR] bcftools mpileup/call fallito."; exit 1; }
+  bcftools index "$BCFTOOLS_VCF_OUTPUT" || { echo "[ERROR] bcftools index fallito."; exit 1; }
+  conda deactivate
+  echo "[INFO] Le varianti BCFtools-based de novo vs Reference si trovano in $BCFTOOLS_VCF_OUTPUT"
+else
+  echo "[1] Salto della chiamata delle varianti BCFtools-based (De novo vs Ref)."
+fi
 
-  # 5. Optional: Annotate variants with BCFtools csq
-  local PERFORM_ANNOTATION="n"
-  if [[ -f "$REF_GFF" ]]; then
-      read -r -p "Reference GFF/GTF file provided. Do you want to perform variant annotation with BCFtools csq? (y/n): " PERFORM_ANNOTATION
-  fi
+# ---
 
-  if [[ "$PERFORM_ANNOTATION" =~ ^[Yy]$ ]]; then
-    if [[ ! -f "$REF_GFF" ]]; then
-      echo "[WARNING] GFF/GTF file not found: $REF_GFF. Skipping BCFtools csq annotation."
-    else
-      echo "[INFO] Annotating variants using BCFtools csq..."
-      # Ensure the reference FASTA is indexed for bcftools csq
-      if [[ ! -f "$REFERENCE_GENOME.fai" ]]; then
-        echo "[INFO] Creating FASTA index for reference genome ($REFERENCE_GENOME.fai)..."
-        samtools faidx "$REFERENCE_GENOME" || { echo "[ERROR] Samtools faidx failed."; exit 1; }
-      fi
-      # Annotate with bcftools csq
-      bcftools csq -f "$REFERENCE_GENOME" -g "$REF_GFF" -o "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered_annotated_bcftools.vcf" "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered.vcf.gz" || { echo "[ERROR] BCFtools csq annotation failed."; exit 1; }
-      echo "[INFO] Annotated filtered de novo vs Reference variants (BCFtools csq): $BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered_annotated_bcftools.vcf"
+# === STEP 2: Filter BCFtools Variants for High Confidence (QUAL >= 30) ===
+# Filter the variants called by BCFtools (de novo vs reference) to keep only high-confidence calls.
+FILTERED_VCF_OUTPUT="$OUTDIR/variant_calling_bcftools/denovo_vs_ref_filtered.vcf.gz"
+if should_run_step "$FILTERED_VCF_OUTPUT" "Filter BCFtools-based Variants"; then
+  echo "[2] Filtro delle varianti BCFtools-based de novo vs riferimento (QUAL >= 30) per alta confidenza..."
+  # mkdir -p "$OUTDIR/variant_calling_bcftools" # Handled by should_run_step
+  VCF_INPUT="$OUTDIR/variant_calling_bcftools/denovo_vs_ref.vcf.gz"
+  VCF_TEMP_OUTPUT="$OUTDIR/variant_calling_bcftools/denovo_vs_ref_filtered.vcf" # Non-gzipped temporary file
+  conda activate qc_env || { echo "[ERROR] Impossibile attivare 'qc_env'. Controlla i tuoi ambienti Conda."; exit 1; } # Assuming bcftools is here
+  bcftools filter -e 'QUAL<30' "$VCF_INPUT" -o "$VCF_TEMP_OUTPUT" -Ov || { echo "[ERROR] bcftools filter fallito."; exit 1; }
+  bgzip -c "$VCF_TEMP_OUTPUT" > "$FILTERED_VCF_OUTPUT" || { echo "[ERROR] bgzip fallito."; exit 1; }
+  bcftools index "$FILTERED_VCF_OUTPUT" || { echo "[ERROR] bcftools index fallito."; exit 1; }
+  rm "$VCF_TEMP_OUTPUT" # Clean up temporary non-gzipped file
+  conda deactivate
+  echo "[INFO] Varianti filtrate ad alta confidenza de novo vs Reference: $FILTERED_VCF_OUTPUT"
+else
+  echo "[2] Salto del filtro delle varianti BCFtools-based."
+fi
+
+# ---
+
+# === STEP 3: Annotate Filtered Variants using BCFtools csq (Conditional) ===
+ANNOTATED_VCF_OUTPUT="$OUTDIR/variant_calling_bcftools/denovo_vs_ref_filtered_annotated_bcftools.vcf"
+if [[ "$PERFORM_ANNOTATION" == "y" ]]; then
+  if should_run_step "$ANNOTATED_VCF_OUTPUT" "Annotation of Filtered De novo vs Reference Variants (BCFtools csq)"; then
+    echo "[3] Annotazione delle varianti filtrate de novo vs riferimento usando BCFtools csq..."
+    conda activate qc_env || { echo "[ERROR] Impossibile attivare 'qc_env'. Controlla i tuoi ambienti Conda."; exit 1; }
+
+    # Ensure the reference FASTA is indexed for bcftools csq
+    if [[ ! -f "$REFERENCE.fai" ]]; then
+      echo "[INFO] Creazione dell'indice FASTA per il genoma di riferimento ($REFERENCE.fai)..."
+      samtools faidx "$REFERENCE" || { echo "[ERROR] samtools faidx fallito."; exit 1; }
     fi
+
+    # Annotate with bcftools csq
+    bcftools csq -f "$REFERENCE" -g "$GFF" -o "$ANNOTATED_VCF_OUTPUT" "$FILTERED_VCF_OUTPUT" || { echo "[ERROR] bcftools csq annotation fallito."; exit 1; }
+    conda deactivate
+    echo "[INFO] Varianti annotate filtrate de novo vs Reference (BCFtools csq): $ANNOTATED_VCF_OUTPUT"
   else
-    echo "[INFO] Skipping variant annotation as requested."
+    echo "[3] Salto dell'annotazione delle varianti filtrate (BCFtools csq)."
   fi
-  conda deactivate
 else
-  echo "[3/3] Skipping BCFtools Variant Calling and Annotation."
+  echo "[INFO] L'annotazione delle varianti è stata saltata come richiesto."
 fi
 
+# ---
+
 echo ""
-echo "[DONE] De novo assembly to Reference comparison pipeline completed successfully."
-echo "--- Key Comparison Outputs ---"
-echo "-> QUAST reports: $QUAST_COMP_DIR/"
-echo "-> Structural differences (MUMmer plots and coords): $MUMMER_ALIGN_DIR/"
-echo "-> High-confidence point mutations (BCFtools-based): ${BCFTOOLS_VARIANT_DIR}/denovo_vs_ref_filtered.vcf.gz"
-if [[ "$PERFORM_ANNOTATION" =~ ^[Yy]$ && -f "$BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered_annotated_bcftools.vcf" ]]; then
-  echo "-> Annotated variants (BCFtools csq): $BCFTOOLS_VARIANT_DIR/denovo_vs_ref_filtered_annotated_bcftools.vcf"
+echo "[FATTO] Pipeline di confronto assemblaggio de novo vs riferimento completata con successo."
+echo "--- Output chiave del confronto ---"
+echo "-> Differenze strutturali (grafici MUMmer e coordinate): $OUTDIR/aln_mummer/"
+if [[ "$PERFORM_ANNOTATION" == "y" ]]; then
+  echo "-> Mutazioni puntiformi ad alta confidenza (de novo vs Reference, basate su BCFtools, annotate con BCFtools csq): $ANNOTATED_VCF_OUTPUT"
+else
+  echo "-> Mutazioni puntiformi ad alta confidenza (de novo vs Reference, basate su BCFtools, NON ANNOTATE): $FILTERED_VCF_OUTPUT"
 fi
+echo ""
+echo "Questo script fornisce un confronto robusto del tuo assemblaggio de novo pulito rispetto al genoma di riferimento."
