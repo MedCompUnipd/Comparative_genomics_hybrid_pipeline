@@ -9,11 +9,11 @@ It streamlines analysis from raw signal to polished genome assemblies, including
 ## 💻 Features
 This pipeline includes scripts and configurations for:
 
-- **Conversion**: fast5 → pod5 using pod5tools
+- **Conversion**: fast5 to pod5 using pod5tools
 
 - **Basecalling**: performed using Dorado
 
-- **Taxonomic analysis**: Kraken2
+- **Taxonomic analysis**: using Kraken2
 
 - **Quality Control**: Nanoplot, FastQC, Qualimap
 
@@ -23,23 +23,18 @@ This pipeline includes scripts and configurations for:
   
 - **Comparison & Evaluation**: QUAST, MUMmer, Minimap2, BLAST, GLSEARCH, BCFtools
     
-- **Polishing**:
-
-  -*DNA-based*: Racon, Medaka
-
-  -*RNA-based*: BWA, Pilon
+- **Polishing**: Racon, Medaka, BWA, Pilon
 
 
 ## ✅ Requirements
 - Bash (Linux environment)
 - Conda or Miniconda installed
-- Compatible bioinformatics tools installed and accessible in your $PATH (read the SetupEnvironments file)
+- Compatible bioinformatics tools installed and accessible in your $PATH (**read the SetupEnvironments file**)
 
 
 ## 🚀 Running the Pipeline
-Run the main orchestration script
 The pipeline is controlled by a master bash script which runs all analysis steps and logs progress:
-bash pipelineONT.sh
+bash 0_master.sh
 
 ## 📊 Outputs
 - Polished genome assemblies and their stats and reports;
@@ -48,7 +43,7 @@ bash pipelineONT.sh
 - Alignment logs and summary reports.
 
 ## 📚 Additional Notes
-For reference genomes and annotation data, download FASTA and GFF3 files from NCBI:
+For reference genomes and annotation data, download FASTA files from NCBI and GFF3 files EMBL-EBI:
 - NCBI Genomes
 - Use tools like wget or Entrez Direct for batch downloads.
 - Visualize your results with genome browsers like IGV or Artemis.
