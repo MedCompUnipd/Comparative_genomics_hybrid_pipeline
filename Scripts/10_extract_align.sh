@@ -2,7 +2,6 @@
 set -euo pipefail
 
 # --- Conda setup ---
-# Function to check if a command exists
 command_exists () {
     command -v "$1" &> /dev/null
 }
@@ -43,7 +42,6 @@ fi
 
 # === SETUP ===
 mkdir -p "$ALIGNMENT_DIR" || { echo "[ERROR] Failed to create alignment directory: $ALIGNMENT_DIR"; exit 1; }
-# Clear or create the unaligned output file
 > "$OUTPUT_UNALIGNED_FASTA" || { echo "[ERROR] Failed to create/clear unaligned FASTA file: $OUTPUT_UNALIGNED_FASTA"; exit 1; }
 
 TMP_FASTA_DIR="${ALIGNMENT_DIR}/tmp_region_fastas"
@@ -61,49 +59,43 @@ process_region() {
 
   echo "[INFO] Processing region: $region_id"
 
-  # Write region to the unaligned output FASTA file
   echo ">${region_id}" >> "$OUTPUT_UNALIGNED_FASTA"
-  # Add sequence wrapping for better FASTA formatting
   echo "$subseq" | fold -w 60 >> "$OUTPUT_UNALIGNED_FASTA"
 
-  # Write region to a temporary FASTA file for glsearch
   local region_file="${TMP_FASTA_DIR}/${region_id}.fasta"
   echo ">${region_id}" > "$region_file"
   echo "$subseq" | fold -w 60 >> "$region_file"
 
-  # Run glsearch36
   local glsearch_output="${ALIGNMENT_DIR}/${region_id}.glsearch.out"
   echo "  → Running glsearch36 on $region_id against $DB_FILE. Output to $glsearch_output"
-  glsearch36 -m 8 "$region_file" "$DB_FILE" > "$glsearch_output" || { echo "[WARNING] glsearch36 failed for region $region_id. Check $glsearch_output"; } # Allow individual glsearch failures
+  glsearch36 -m 0 "$region_file" "$DB_FILE" > "$glsearch_output" || { echo "[WARNING] glsearch36 failed for region $region_id. Check $glsearch_output"; }
 }
 
-# === MAIN LOGIC: Iterate through masked FASTA to find non-N regions ===
+# === MAIN LOGIC ===
 echo "[INFO] Reading input masked FASTA file: $INPUT_MASKED_FASTA"
 
 CURRENT_HEADER=""
 SEQUENCE=""
 REGION_COUNT=1
-IN_REGION=0 # 0 = outside N region, 1 = inside non-N region
-START_POS=0 # 1-based start position of current non-N region
+IN_REGION=0
+START_POS=0
 
 while IFS= read -r line || [[ -n "$line" ]]; do
-  line=$(echo "$line" | tr -d '\r') # Remove carriage returns for cross-OS compatibility
+  line=$(echo "$line" | tr -d '\r')
 
-  if [[ "$line" =~ ^> ]]; then
-    # Process the previous sequence's last region if any
+  if [[ "$line" =~ ^">" ]]; then
     if [[ -n "$SEQUENCE" ]]; then
       SEQ_LEN=${#SEQUENCE}
       if [[ $IN_REGION -eq 1 ]]; then
-        # If still in a region at end of sequence, close it
         END_POS="$SEQ_LEN"
         SUBSEQ="${SEQUENCE:$((START_POS-1)):$(($END_POS - $START_POS + 1))}"
         process_region "$CURRENT_HEADER" "$REGION_COUNT" "$START_POS" "$END_POS" "$SUBSEQ"
         REGION_COUNT=$((REGION_COUNT + 1))
       fi
     fi
-    CURRENT_HEADER=$(echo "$line" | cut -d' ' -f1 | sed 's/^>//' | sed 's/[^a-zA-Z0-9._-]/_/g') # Sanitize header
+    CURRENT_HEADER=$(echo "$line" | cut -d' ' -f1 | sed 's/^>//' | sed 's/[^a-zA-Z0-9._-]/_/g')
     SEQUENCE=""
-    REGION_COUNT=1 # Reset region count for new sequence
+    REGION_COUNT=1
     IN_REGION=0
     START_POS=0
     echo "[INFO] Reading sequence for header: $CURRENT_HEADER"
@@ -112,38 +104,35 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   fi
 done < "$INPUT_MASKED_FASTA"
 
-# Process the last sequence in the file
+# Process last sequence
 if [[ -n "$SEQUENCE" ]]; then
   SEQ_LEN=${#SEQUENCE}
   IN_REGION=0
   START_POS=0
   for (( i=0; i<SEQ_LEN; i++ )); do
     CHAR="${SEQUENCE:$i:1}"
-    CURRENT_1_BASED_POS=$((i+1)) # 1-based position
+    CURRENT_1_BASED_POS=$((i+1))
 
     if [[ "$CHAR" != "N" && $IN_REGION -eq 0 ]]; then
       START_POS="$CURRENT_1_BASED_POS"
       IN_REGION=1
-    elif ([[ "$CHAR" == "N" ]] || [[ "$CURRENT_1_BASED_POS" -eq "$SEQ_LEN" ]]) && [[ $IN_REGION -eq 1 ]]; then
-      # End of a non-N region
+    elif [[ ( "$CHAR" == "N" || "$CURRENT_1_BASED_POS" -eq "$SEQ_LEN" ) && $IN_REGION -eq 1 ]]; then
       if [[ "$CURRENT_1_BASED_POS" -eq "$SEQ_LEN" && "$CHAR" != "N" ]]; then
-        END_POS="$CURRENT_1_BASED_POS" # Last character is non-N
+        END_POS="$CURRENT_1_BASED_POS"
       else
-        END_POS=$((CURRENT_1_BASED_POS - 1)) # N was encountered, end is before N
+        END_POS=$((CURRENT_1_BASED_POS - 1))
       fi
-      
-      # Ensure start is before end
+
       if [[ "$START_POS" -le "$END_POS" ]]; then
-          SUBSEQ="${SEQUENCE:$((START_POS-1)):$(($END_POS - $START_POS + 1))}"
-          process_region "$CURRENT_HEADER" "$REGION_COUNT" "$START_POS" "$END_POS" "$SUBSEQ"
-          REGION_COUNT=$((REGION_COUNT + 1))
+        SUBSEQ="${SEQUENCE:$((START_POS-1)):$(($END_POS - $START_POS + 1))}"
+        process_region "$CURRENT_HEADER" "$REGION_COUNT" "$START_POS" "$END_POS" "$SUBSEQ"
+        REGION_COUNT=$((REGION_COUNT + 1))
       fi
       IN_REGION=0
     fi
   done
 fi
 
-# Clean up temporary files directory
 rm -rf "$TMP_FASTA_DIR" || echo "[WARNING] Failed to remove temporary directory: $TMP_FASTA_DIR"
 
 echo ""
