@@ -2,7 +2,6 @@
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
-# Exit if any command in a pipeline fails.
 set -o pipefail
 
 echo "#################################################################"
@@ -31,15 +30,17 @@ else
 fi
 echo "[INFO] Detected shell profile: $SHELL_PROFILE"
 
-# Check if conda is available and load its hook
+# Load conda environment
 echo "[INFO] Loading Conda hook..."
 if ! command_exists conda; then
     echo "[ERROR] Conda is not installed or not in PATH. Please install Miniconda/Anaconda first."
     exit 1
 fi
 eval "$(conda shell.bash hook)"
+
 echo "[INFO] Starting Conda environment setup..."
 echo ""
+
 echo "--- INSTALLING SOFTWARE AND CONDA ENVIRONMENTS ---"
 echo "------------------------------------------------"
 
@@ -74,7 +75,7 @@ DORADO_DOWNLOAD_FILENAME="dorado.tar.gz"
 if [[ -x "$DORADO_BIN/dorado" ]]; then
     echo "[INFO] Dorado is already installed in $DORADO_BIN, skipping download."
 else
-    mkdir -p "$DORADO_DIR" || { echo "[ERROR] Could not create directory $DORADO_DIR. Exiting."; exit 1; }
+    mkdir -p "$DORADO_DIR"
     pushd "$DORADO_DIR" > /dev/null
     echo "[INFO] Downloading Dorado..."
     curl -fL "$DORADO_URL" -o "$DORADO_DOWNLOAD_FILENAME" || { echo "[ERROR] Failed to download Dorado. Exiting."; popd > /dev/null; exit 1; }
@@ -87,11 +88,7 @@ fi
 
 if [[ ":$PATH:" != *":$DORADO_BIN:"* ]]; then
     echo "[INFO] Adding Dorado to PATH in $SHELL_PROFILE"
-    {
-        echo ""
-        echo "# Added by Dorado installer"
-        echo "export PATH=\"\$PATH:$DORADO_BIN\""
-    } >> "$SHELL_PROFILE"
+    echo -e "\n# Added by Dorado installer\nexport PATH=\"\$PATH:$DORADO_BIN\"" >> "$SHELL_PROFILE"
     source "$SHELL_PROFILE"
 fi
 export PATH="$PATH:$DORADO_BIN"
@@ -143,11 +140,7 @@ fi
 
 if [[ ":$PATH:" != *":$CANU_BIN:"* ]]; then
     echo "[INFO] Adding Canu to PATH in $SHELL_PROFILE"
-    {
-        echo ""
-        echo "# Added by Canu installer"
-        echo "export PATH=\"\$PATH:$CANU_BIN\""
-    } >> "$SHELL_PROFILE"
+    echo -e "\n# Added by Canu installer\nexport PATH=\"\$PATH:$CANU_BIN\"" >> "$SHELL_PROFILE"
     source "$SHELL_PROFILE"
 fi
 export PATH="$PATH:$CANU_BIN"
@@ -175,11 +168,7 @@ fi
 
 if [[ ":$PATH:" != *":$(dirname "$HIFIASM_BIN"):"* ]]; then
     echo "[INFO] Adding Hifiasm to PATH in $SHELL_PROFILE"
-    {
-        echo ""
-        echo "# Added by Hifiasm installer"
-        echo "export PATH=\"\$PATH:$(dirname "$HIFIASM_BIN")\""
-    } >> "$SHELL_PROFILE"
+    echo -e "\n# Added by Hifiasm installer\nexport PATH=\"\$PATH:$(dirname "$HIFIASM_BIN")\"" >> "$SHELL_PROFILE"
     source "$SHELL_PROFILE"
 fi
 export PATH="$PATH:$(dirname "$HIFIASM_BIN")"
@@ -203,89 +192,50 @@ NEXTDENOVO_REPO="https://github.com/Nextomics/NextDenovo/releases/latest/downloa
 NEXTDENOVO_CLONE_DIR="$NDN_DIR/NextDenovo"
 NDN_BIN="$NEXTDENOVO_CLONE_DIR/nextDenovo"
 
-
 if [[ -f "$NDN_BIN" ]]; then
     echo "[INFO] NextDenovo already cloned."
 else
     mkdir -p "$NDN_DIR"
-   NDN_TGZ="$NDN_DIR/NextDenovo.tgz"
-	 wget -O "$NDN_TGZ" "$NEXTDENOVO_REPO" || { echo "[ERROR] Failed to download NextDenovo. Exiting."; exit 1; }
-   tar -xzf "$NDN_TGZ" -C "$NDN_DIR" || { echo "[ERROR] Failed to extract NextDenovo. Exiting."; exit 1; }
-   rm "$NDN_TGZ"
+    NDN_TGZ="$NDN_DIR/NextDenovo.tgz"
+    wget -O "$NDN_TGZ" "$NEXTDENOVO_REPO" || { echo "[ERROR] Failed to download NextDenovo. Exiting."; exit 1; }
+    tar -xzf "$NDN_TGZ" -C "$NDN_DIR" || { echo "[ERROR] Failed to extract NextDenovo. Exiting."; exit 1; }
+    rm "$NDN_TGZ"
 fi
 
 NDN_LIB_PATH="$NEXTDENOVO_CLONE_DIR/lib"
 if [[ ":$PYTHONPATH:" != *":$NDN_LIB_PATH:"* ]]; then
     echo "[INFO] Adding NextDenovo lib to PYTHONPATH in $SHELL_PROFILE"
-    {
-        echo ""
-        echo "# Added by NextDenovo installer"
-        echo "export PYTHONPATH=\"\$PYTHONPATH:$NDN_LIB_PATH\""
-    } >> "$SHELL_PROFILE"
+    echo -e "\n# Added by NextDenovo installer\nexport PYTHONPATH=\"\$PYTHONPATH:$NDN_LIB_PATH\"" >> "$SHELL_PROFILE"
     source "$SHELL_PROFILE"
 fi
 export PYTHONPATH="$PYTHONPATH:$NDN_LIB_PATH"
 echo "[INFO] Setup complete."
-
-# === 5. polishing_env ===
-echo "[5/9] Creating environment: polishing_env"
-if ! conda env list | grep -q "polishing_env"; then
-    conda create -y -n polishing_env -c bioconda -c nanoporetech -c conda-forge \
-        medaka racon quast || \
-        { echo "[ERROR] Failed to create 'polishing_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "[INFO] Environment 'polishing_env' already exists."
-fi
-echo "[INFO] 'polishing_env' setup complete."
 echo ""
 
-# === 6. qc_env ===
-echo "[6/9] Creating environment: qc_env"
-if ! conda env list | grep -q "qc_env"; then
-    conda create -y -n qc_env -c bioconda -c conda-forge \
-        nanoplot fastqc qualimap bcftools samtools fastp || \
-        { echo "[ERROR] Failed to create 'qc_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "[INFO] Environment 'qc_env' already exists."
-fi
-echo "[INFO] 'qc_env' setup complete."
-echo ""
+# === 5-9. Other environments ===
+declare -A envs=(
+  ["polishing_env"]="medaka racon quast"
+  ["qc_env"]="nanoplot fastqc qualimap bcftools samtools fastp"
+  ["illuminareads_env"]="bwa pilon"
+  ["mummer_env"]="mummer bedtools blast"
+  ["fasta3_env"]="pandas openpyxl biopython fasta3"
+)
 
-# === 7. illuminareads_env ===
-echo "[7/9] Creating environment: illuminareads_env"
-if ! conda env list | grep -q "illuminareads_env"; then
-    conda create -y -n illuminareads_env -c bioconda -c conda-forge \
-        bwa pilon || \
-        { echo "[ERROR] Failed to create 'illuminareads_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "[INFO] Environment 'illuminareads_env' already exists."
-fi
-echo "[INFO] 'illuminareads_env' setup complete."
-echo ""
-
-# === 8. mummer_env ===
-echo "[8/9] Creating environment: mummer_env"
-if ! conda env list | grep -q "mummer_env"; then
-    conda create -y -n mummer_env -c bioconda -c conda-forge \
-        mummer bedtools blast || \
-        { echo "[ERROR] Failed to create 'mummer_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "[INFO] Environment 'mummer_env' already exists."
-fi
-echo "[INFO] 'mummer_env' setup complete."
-echo ""
-
-# === 9. fasta3_env ===
-echo "[9/9] Creating environment: fasta3_env"
-if ! conda env list | grep -q "fasta3_env"; then
-    conda create -y -n fasta3_env -c conda-forge -c bioconda \
-        pandas openpyxl biopython fasta3 || \
-        { echo "[ERROR] Failed to create 'fasta3_env' Conda environment. Exiting."; exit 1; }
-else
-    echo "[INFO] Environment 'fasta3_env' already exists."
-fi
-echo "[INFO] 'fasta3_env' setup complete."
-echo ""
+i=5
+for env in "${!envs[@]}"; do
+  echo "[$i/9] Creating environment: $env"
+  if ! conda env list | grep -q "$env"; then
+    conda create -y -n "$env" -c bioconda -c conda-forge ${envs[$env]} || {
+        echo "[ERROR] Failed to create '$env'. Exiting."
+        exit 1
+    }
+  else
+    echo "[INFO] Environment '$env' already exists."
+  fi
+  echo "[INFO] '$env' setup complete."
+  echo ""
+  ((i++))
+done
 
 echo "#####################################################"
 echo "#           SETUP COMPLETE!                       #"
