@@ -9,15 +9,6 @@ AUTO_MODE=false  # Set to true to skip interactive prompts
 ORIG_PWD="$(pwd)"
 trap 'cd "$ORIG_PWD"; echo "[ERROR] Unexpected interruption or failure."; exit 1' ERR
 
-# === REQUIRED TOOLS CHECK ===
-required_tools=(conda kraken2 bwa samtools fastqc fastp minimap2 qualimap)
-for tool in "${required_tools[@]}"; do
-  if ! command -v "$tool" &>/dev/null; then
-    echo "[ERROR] Required tool '$tool' not found in PATH."
-    exit 1
-  fi
-done
-
 # === LOAD CONDA ===
 if ! command -v conda &> /dev/null; then
   echo "[ERROR] 'conda' not found. Please ensure Conda is installed and initialized."
