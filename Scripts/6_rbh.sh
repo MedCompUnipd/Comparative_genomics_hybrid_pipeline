@@ -1,6 +1,6 @@
 #!/bin/bash
-set -euo pipefail # Exit immediately if a command exits with a non-zero status, if a variable is unset, or if a command in a pipeline fails.
-shopt -s nullglob # Allows patterns that match no files to expand to a null string.
+set -euo pipefail 
+shopt -s nullglob 
 
 # === SAVE ORIGINAL DIRECTORY ===
 ORIG_PWD="$(pwd)"
@@ -36,7 +36,7 @@ write_temp_fasta() {
 sanitize_filename() {
     local name="$1"
     # Replaces problematic characters with underscores and removes non-alphanumeric except _. -
-    echo "$name" | tr ' /|[]()=' '______' | tr -cd '[:alnum:]_.-'
+    echo "$name" | tr ' /|[]()=' '_' | tr -cd '[:alnum:]_.-'
 }
 
 # === USER INPUT ===
@@ -79,12 +79,12 @@ align_contig_to_genes() {
 
     # Read genes file line by line
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" =~ ^> ]]; then
+        if [[ "$line" =~ ^">" ]]; then
             if [[ -n "$CURRENT_HEADER" && -n "$CURRENT_SEQ" ]]; then
                 local SAFE_HEADER=$(sanitize_filename "$CURRENT_HEADER")
                 write_temp_fasta "$CURRENT_HEADER" "$CURRENT_SEQ" "$TEMP_GENE_FILE" || return 1
-                echo "→ Aligning $SAFE_HEADER vs. Contig..."
-                glsearch36 -m 0 "$contig_file" "$TEMP_GENE_FILE" > "$out_dir/${SAFE_HEADER}.glsearch.out" || {
+                echo "â†’ Aligning $SAFE_HEADER vs. Contig..."
+                glsearch36 -m 0 "$TEMP_GENE_FILE" "$contig_file" > "$out_dir/${SAFE_HEADER}.glsearch.out" || {
                     echo "[ERROR] glsearch36 failed for $SAFE_HEADER vs contig."
                     rm -f "$TEMP_GENE_FILE"
                     return 1
@@ -101,8 +101,8 @@ align_contig_to_genes() {
     if [[ -n "$CURRENT_HEADER" && -n "$CURRENT_SEQ" ]]; then
         local SAFE_HEADER=$(sanitize_filename "$CURRENT_HEADER")
         write_temp_fasta "$CURRENT_HEADER" "$CURRENT_SEQ" "$TEMP_GENE_FILE" || return 1
-        echo "→ Aligning $SAFE_HEADER vs. Contig (last gene)..."
-        glsearch36 -m 0 "$contig_file" "$TEMP_GENE_FILE" > "$out_dir/${SAFE_HEADER}.glsearch.out" || {
+        echo "â†’ Aligning $SAFE_HEADER vs. Contig (last gene)..."
+        glsearch36 -m 0 "$TEMP_GENE_FILE" "$contig_file" > "$out_dir/${SAFE_HEADER}.glsearch.out" || {
             echo "[ERROR] glsearch36 failed for last gene ($SAFE_HEADER) vs contig."
             rm -f "$TEMP_GENE_FILE"
             return 1
@@ -126,14 +126,14 @@ align_genes_to_contig() {
     local CURRENT_SEQ=""
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" =~ ^> ]]; then
+        if [[ "$line" =~ ^">" ]]; then
             if [[ -n "$CURRENT_HEADER" && -n "$CURRENT_SEQ" ]]; then
                 local SAFE_HEADER=$(sanitize_filename "$CURRENT_HEADER")
                 local TEMP_GENE_FILE="${out_dir}/tmp_gene_for_${SAFE_HEADER}.fasta"
                 write_temp_fasta "$CURRENT_HEADER" "$CURRENT_SEQ" "$TEMP_GENE_FILE" || {
                     echo "[ERROR] Failed to create temporary gene file for $CURRENT_HEADER"; rm -f "$TEMP_CONTIG_FILE"; return 1;
                 }
-                echo "→ Aligning Gene $SAFE_HEADER vs. Contig..."
+                echo "â†’ Aligning Gene $SAFE_HEADER vs. Contig..."
                 glsearch36 -m 0 "$TEMP_GENE_FILE" "$TEMP_CONTIG_FILE" > "$out_dir/${SAFE_HEADER}.glsearch.out" || {
                     echo "[ERROR] glsearch36 failed for gene ($SAFE_HEADER) vs contig."
                     rm -f "$TEMP_CONTIG_FILE" "$TEMP_GENE_FILE"
@@ -155,7 +155,7 @@ align_genes_to_contig() {
         write_temp_fasta "$CURRENT_HEADER" "$CURRENT_SEQ" "$TEMP_GENE_FILE" || {
             echo "[ERROR] Failed to create temporary gene file for the last gene $CURRENT_HEADER"; rm -f "$TEMP_CONTIG_FILE"; return 1;
         }
-        echo "→ Aligning last Gene $SAFE_HEADER vs. Contig..."
+        echo "â†’ Aligning last Gene $SAFE_HEADER vs. Contig..."
         glsearch36 -m 0 "$TEMP_GENE_FILE" "$TEMP_CONTIG_FILE" > "$out_dir/${SAFE_HEADER}.glsearch.out" || {
             echo "[ERROR] glsearch36 failed for last gene ($SAFE_HEADER) vs contig."
             rm -f "$TEMP_CONTIG_FILE" "$TEMP_GENE_FILE"
