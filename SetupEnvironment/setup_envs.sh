@@ -175,9 +175,13 @@ export PATH="$PATH:$(dirname "$HIFIASM_BIN")"
 echo ""
 
 # === 4. ndn_env ===
+
+
+
+# === 4. ndn_env ===
 echo "[4/9] Creating environment: ndn_env"
 if ! conda env list | grep -q "ndn_env"; then
-    conda create -y -n ndn_env python=3.10 -c bioconda -c conda-forge minimap2 samtools || {
+    conda create -y -n ndn_env python=3.10 minimap2 samtools -c bioconda -c conda-forge || {
         echo "[ERROR] Failed to create 'ndn_env'. Exiting."
         exit 1
     }
@@ -211,8 +215,29 @@ fi
 export PYTHONPATH="$PYTHONPATH:$NDN_LIB_PATH"
 echo "[INFO] Setup complete."
 echo ""
+if [[ ":$PATH:" != *":$NEXTDENOVO_CLONE_DIR:"* ]]; then
+    echo "[INFO] Adding NextDenovo to PATH in $SHELL_PROFILE"
+    echo -e "\n# Added by NextDenovo installer\nexport PATH=\"\$PATH:$NEXTDENOVO_CLONE_DIR\"" >> "$SHELL_PROFILE"
+    source "$SHELL_PROFILE"
+fi
+export PATH="$PATH:$NEXTDENOVO_CLONE_DIR"
 
-# === 5-9. Other environments ===
+
+# === 5. rnaseq_env ===
+
+echo "[5/9] Creating environment: rnaseq_env"
+if ! conda env list | grep -q "rnaseq_env"; then
+    conda create -y -n rnaseq_env -c bioconda -c conda-forge hisat2 samtools subread || {
+        echo "[ERROR] Failed to create 'rnaseq_env'. Exiting."
+        exit 1
+    }
+else
+    echo "[INFO] Environment 'rnaseq_env' already exists."
+fi
+echo ""
+
+
+# === 6-10. Other environments ===
 declare -A envs=(
   ["polishing_env"]="medaka racon quast"
   ["qc_env"]="nanoplot fastqc qualimap bcftools samtools fastp"
