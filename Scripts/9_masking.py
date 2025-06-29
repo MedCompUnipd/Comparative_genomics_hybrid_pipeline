@@ -1,81 +1,127 @@
 #!/usr/bin/env python3
 
+import csv
+from decimal import Decimal, InvalidOperation
 import os
 import sys
-import csv
-from Bio import SeqIO
 
-print("\n--- FASTA Genes Extraction Script (RBH TSV) ---")
-print("------------------------------------------------")
+print("--- Genome Masking Script ---")
+print("-----------------------------")
 
-# ==== Input ====
-fasta_path = input("Enter path to the de novo genome FASTA file (e.g., your_contig.fasta): ").strip()
-tsv_path = input("Enter path to the TSV file (e.g., RBH_all.tsv from script 7): ").strip()
-output_path = input("Enter desired output FASTA file path for extracted genes: ").strip()
+# ==== User Input ====
+print("Please provide the required paths:")
+tsv_file = input("Enter path to TSV file (e.g., RBH_all.tsv or RBH_100.tsv): ").strip()
+fasta_file = input("Enter path to the input FASTA file (the contig to be masked): ").strip()
+output_dir = input("Enter path to output directory for masked FASTA files: ").strip()
 
-# ==== Validate ====
-if not os.path.exists(fasta_path):
-    sys.exit(f"[ERROR] FASTA file not found: {fasta_path}")
-if not os.path.exists(tsv_path):
-    sys.exit(f"[ERROR] TSV file not found: {tsv_path}")
+# ==== Input Validation ====
+if not os.path.exists(tsv_file):
+    sys.exit(f"[ERROR] TSV file not found: {tsv_file}")
+if not os.path.exists(fasta_file):
+    sys.exit(f"[ERROR] FASTA file not found: {fasta_file}")
 
-# Ensure output directory exists
-output_dir = os.path.dirname(output_path)
-if output_dir and not os.path.exists(output_dir):
-    os.makedirs(output_dir, exist_ok=True)
-    print(f"[INFO] Created output directory: {output_dir}")
+# Extract prefix from FASTA file name (without extension)
+prefix = os.path.basename(fasta_file)
+prefix = os.path.splitext(prefix)[0]
 
-# ==== Load contig sequence ====
-print(f"[INFO] Loading contig sequence from: {fasta_path}")
-try:
-    records = list(SeqIO.parse(fasta_path, "fasta"))
-    if not records:
-        sys.exit("[ERROR] No sequences found in the FASTA file.")
-    if len(records) > 1:
-        print("[WARNING] Multiple sequences found. Using the first.")
-    contig_seq = str(records[0].seq)
-except Exception as e:
-    sys.exit(f"[ERROR] Failed to load FASTA: {e}")
+# Create output directory if it doesn't exist
+os.makedirs(output_dir, exist_ok=True)
+print(f"[INFO] Output directory: {output_dir}")
 
-seq_len = len(contig_seq)
-print(f"[INFO] Contig sequence loaded, length = {seq_len} bp.")
+# ==== Helper Functions ====
+def parse_tsv(tsv_path, min_id=Decimal("0.0"), max_id=Decimal("100.0")):
+    regions = []
+    try:
+        with open(tsv_path, newline='') as tsvfile:
+            reader = csv.DictReader(tsvfile, delimiter='\t')
+            for row in reader:
+                try:
+                    identity = Decimal(row['Identity'].strip())
+                    start_1b = int(row['Contig_Start'])
+                    end_1b = int(row['Contig_End'])
 
-# ==== Extract sequences ====
-written_count = 0
-try:
-    with open(tsv_path, newline="") as tsv_file, open(output_path, "w") as out_fasta:
-        reader = csv.DictReader(tsv_file, delimiter="\t")
-        for row in reader:
-            try:
-                gene_id = row["Gene"]
-                start = int(row["Contig_Start"])
-                end = int(row["Contig_End"])
+                    start = min(start_1b, end_1b) - 1
+                    end = max(start_1b, end_1b)
 
-                # Convert to 0-based indexing for slicing
-                start_0 = min(start, end) - 1
-                end_0 = max(start, end)
+                    if min_id <= identity <= max_id:
+                        regions.append((start, end))
+                except (InvalidOperation, ValueError, KeyError) as e:
+                    print(f"[WARNING] Skipping row due to parsing error: {row}. Error: {e}", file=sys.stderr)
+    except Exception as e:
+        sys.exit(f"[ERROR] An error occurred while parsing the TSV file: {e}")
+    return regions
 
-                if start_0 < 0 or end_0 > seq_len:
-                    print(f"[WARNING] Skipping {gene_id}: out-of-bounds ({start}-{end})", file=sys.stderr)
+
+def load_fasta(fasta_path):
+    header = ""
+    sequence_lines = []
+    try:
+        with open(fasta_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
                     continue
+                if line.startswith('>'):
+                    if header:
+                        print("[WARNING] Multiple sequences found in FASTA. Only the first will be processed.", file=sys.stderr)
+                        break
+                    header = line[1:].strip()
+                else:
+                    sequence_lines.append(line)
+        if not header or not sequence_lines:
+            sys.exit(f"[ERROR] No valid FASTA sequence found in {fasta_path}")
+    except Exception as e:
+        sys.exit(f"[ERROR] An error occurred while loading the FASTA file: {e}")
+    return header, ''.join(sequence_lines)
 
-                seq = contig_seq[start_0:end_0]
-                header = f">{gene_id}_ContigRegion_{start}-{end}"
-                out_fasta.write(header + "\n")
 
-                # Wrap sequence 60 characters per line
-                for i in range(0, len(seq), 60):
-                    out_fasta.write(seq[i:i+60] + "\n")
+def mask_sequence(sequence, regions):
+    masked = list(sequence)
+    for start, end in regions:
+        start = max(0, start)
+        end = min(len(sequence), end)
+        if start < end:
+            masked[start:end] = ['N'] * (end - start)
+    return "".join(masked)
 
-                written_count += 1
 
-            except (KeyError, ValueError) as e:
-                print(f"[WARNING] Skipping row: {row}. Error: {e}", file=sys.stderr)
-                continue
+def write_fasta(header, sequence, output_path, wrap_len=60):
+    try:
+        with open(output_path, 'w') as f:
+            f.write(f">{header}\n")
+            for i in range(0, len(sequence), wrap_len):
+                f.write(sequence[i:i+wrap_len] + '\n')
+    except Exception as e:
+        print(f"[ERROR] Failed to write FASTA file {output_path}: {e}", file=sys.stderr)
 
-except Exception as e:
-    sys.exit(f"[ERROR] Failed during extraction: {e}")
+# ==== MAIN EXECUTION ====
+print(f"[INFO] Loading FASTA file: {fasta_file}")
+header, sequence = load_fasta(fasta_file)
+print(f"[INFO] FASTA sequence loaded. Length: {len(sequence)}")
 
-print(f"[INFO] Extracted {written_count} gene regions.")
-print(f"[INFO] Output written to: {output_path}")
-print("------------------------------------------------")
+# Mask 100% identity
+print("[INFO] Masking regions with 100% identity...")
+regions_100 = parse_tsv(tsv_file, min_id=Decimal("100.0"), max_id=Decimal("100.0"))
+masked_100 = mask_sequence(sequence, regions_100)
+output_100 = os.path.join(output_dir, f"{prefix}_masked_100.fasta")
+write_fasta(header, masked_100, output_100)
+print(f"[INFO] Saved: {output_100}")
+
+# Mask 95â€“99.9% identity
+print("[INFO] Masking regions with 95.0% to 99.9% identity...")
+regions_95_999 = parse_tsv(tsv_file, min_id=Decimal("95.0"), max_id=Decimal("99.9"))
+masked_95_999 = mask_sequence(sequence, regions_95_999)
+output_95_999 = os.path.join(output_dir, f"{prefix}_masked_95_99.9.fasta")
+write_fasta(header, masked_95_999, output_95_999)
+print(f"[INFO] Saved: {output_95_999}")
+
+# Mask ALL aligned regions
+print("[INFO] Masking ALL aligned regions (regardless of identity)...")
+regions_all = parse_tsv(tsv_file, min_id=Decimal("0.0"), max_id=Decimal("100.0"))
+masked_all = mask_sequence(sequence, regions_all)
+output_all = os.path.join(output_dir, f"{prefix}_masked_all.fasta")
+write_fasta(header, masked_all, output_all)
+print(f"[INFO] Saved: {output_all}")
+
+print("\n-----------------------------")
+print("Genome masking completed.")
