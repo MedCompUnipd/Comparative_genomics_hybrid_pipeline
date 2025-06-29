@@ -144,7 +144,7 @@ df_below_95.to_csv(os.path.join(output_dir, "RBH_below_95.tsv"), sep="\t", index
 print(f"Processed {total_files} files.")
 print(f"Skipped {skipped_files} files due to missing pairs.")
 print(f"Total RBHs found: {len(df)}")
-print(f" - 100% identity (≥99.99): {len(df_100)}")
+print(f" - 100% identity (â‰¥99.99): {len(df_100)}")
 print(f" - 95-99% identity: {len(df_95_99)}")
 print(f" - Below 95% identity: {len(df_below_95)}")
 print(f"Excel file saved to: {excel_path}")
