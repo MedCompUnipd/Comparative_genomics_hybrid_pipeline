@@ -49,13 +49,13 @@ mkdir -p "$(dirname "$OUTPUT_FORMAT0")" "$(dirname "$OUTPUT_FORMAT6")" "$(dirnam
 # === MAIN EXECUTION ===
 
 echo -e "\n[1/3] Running fasty36 in readable format (-m 0)..."
-fasty36 -E 1e-5 -m 0 "$QUERY_NUC" "$REF_PROTEIN" > "$OUTPUT_FORMAT0" || {
+fasty36 -E 1e-5 -m 0 -s P250 "$QUERY_NUC" "$REF_PROTEIN" > "$OUTPUT_FORMAT0" || {
     echo "[ERROR] fasty36 failed for readable output. Check log for details."; exit 1;
 }
 echo "[INFO] Readable output saved to: $OUTPUT_FORMAT0"
 
 echo -e "\n[2/3] Running fasty36 in tabular format (-m 8)..."
-fasty36 -E 1e-5 -m 8 "$QUERY_NUC" "$REF_PROTEIN" > "$OUTPUT_FORMAT6" || {
+fasty36 -E 1e-5 -m 8 -s P250 "$QUERY_NUC" "$REF_PROTEIN" > "$OUTPUT_FORMAT6" || {
     echo "[ERROR] fasty36 failed for tabular output. Check log for details."; exit 1;
 }
 echo "[INFO] Tabular output saved to: $OUTPUT_FORMAT6"
@@ -66,55 +66,51 @@ if [[ ! -f "$OUTPUT_FORMAT6" || ! -s "$OUTPUT_FORMAT6" ]]; then
     exit 1
 fi
 
-# AWK script to extract best hits
-awk '
+awk -F'\t' '
 BEGIN {
-    FS="\t"; # Tab separated file
-    OFS="\t"; # Output tab separated
-    print "Query", "Target", "Score", "Expect", "Identity", "Overlap", "Query_start", "Query_end", "Target_start", "Target_end", "Query_len", "Target_len"; # Header
+    OFS = "\t";
+    print "Query", "Target", "Identity", "Align_length", "Mismatches", "Gaps", \
+          "Query_start", "Query_end", "Target_start", "Target_end", \
+          "E-value", "Score", "Query_coverage(%)";
 }
+
+function abs(x) { return x < 0 ? -x : x }
+
 {
     query = $1;
     target = $2;
-    score = $3;
-    expect = $4;
-    identity = $5;
-    overlap = $6;
-    q_start = $7;
-    q_end = $8;
-    t_start = $9;
-    t_end = $10;
-    q_len = $11;
-    t_len = $12;
+    identity = $3;
+    align_len = $4;
+    mismatches = $5;
+    gaps = $6;
+    q_start = $7 + 0;
+    q_end = $8 + 0;
+    t_start = $9 + 0;
+    t_end = $10 + 0;
+    evalue = $11;
+    score = $12;
 
-    # Check if this query has been seen before or if this hit has a better score
-    if (!(query in best_hits) || score > best_hits[query]["score"]) {
-        best_hits[query]["target"] = target;
-        best_hits[query]["score"] = score;
-        best_hits[query]["expect"] = expect;
-        best_hits[query]["identity"] = identity;
-        best_hits[query]["overlap"] = overlap;
-        best_hits[query]["q_start"] = q_start;
-        best_hits[query]["q_end"] = q_end;
-        best_hits[query]["t_start"] = t_start;
-        best_hits[query]["t_end"] = t_end;
-        best_hits[query]["q_len"] = q_len;
-        best_hits[query]["t_len"] = t_len;
+    # Estrai prot_start e prot_end da "location_XXXX..YYYY"
+    match(query, /location_([0-9]+)\.\.([0-9]+)/, loc);
+    if (loc[1] && loc[2]) {
+        prot_start = loc[1] + 0;
+        prot_end = loc[2] + 0;
+        prot_len = abs(prot_end - prot_start) + 1;
+
+        covered_nt = abs(q_end - q_start) + 1;
+        covered_aa = covered_nt / 3;
+        query_coverage = (covered_aa / prot_len) * 100;
+
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%.1f\n", \
+               query, target, identity, align_len, mismatches, gaps, \
+               q_start, q_end, t_start, t_end, evalue, score, query_coverage;
+    } else {
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\tNA\n", \
+               query, target, identity, align_len, mismatches, gaps, \
+               q_start, q_end, t_start, t_end, evalue, score;
     }
 }
-END {
-    # Print all best hits
-    for (q in best_hits) {
-        print q, best_hits[q]["target"], best_hits[q]["score"], best_hits[q]["expect"], \
-              best_hits[q]["identity"], best_hits[q]["overlap"], \
-              best_hits[q]["q_start"], best_hits[q]["q_end"], \
-              best_hits[q]["t_start"], best_hits[q]["t_end"], \
-              best_hits[q]["q_len"], best_hits[q]["t_len"];
-    }
-}' "$OUTPUT_FORMAT6" > "$OUTPUT_SUMMARY" || {
-    echo "[ERROR] Failed to extract best hits using awk. Check $OUTPUT_FORMAT6"; exit 1;
-}
-echo "[INFO] Best hits summary saved to: $OUTPUT_SUMMARY"
+' "$OUTPUT_FORMAT6" > "$OUTPUT_SUMMARY"
 
 
 echo -e "\n----------------------------------------------------------"
