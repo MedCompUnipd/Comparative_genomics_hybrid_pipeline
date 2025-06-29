@@ -77,7 +77,7 @@ mkdir -p "$KRAKEN2_OUT_DIR" "$FILTERED_OUT_DIR" "$NANOPLOT_DIR"
 # Check if the Kraken2 database needs to be built or if user wants to overwrite
 if should_run_step "${DB_PATH}/hash.k2d" "Kraken2 Database Build"; then
     echo "[1/4] Setting up Kraken2 database..."
-    conda activate kraken_env || { echo "[ERROR] Failed to activate 'kraken_env'. Please check your Conda environments."; exit 1; }
+    conda activate kraken2_env || { echo "[ERROR] Failed to activate 'kraken2_env'. Please check your Conda environments."; exit 1; }
 
     # Check if DB_PATH is provided
     if [ -z "$DB_PATH" ]; then
@@ -91,7 +91,7 @@ if should_run_step "${DB_PATH}/hash.k2d" "Kraken2 Database Build"; then
 
     echo "[INFO] Attempting to download and build Kraken2 standard database in $DB_PATH..."
     # kraken2-build --standard automatically downloads and builds the database
-    kraken2-build --standard --db "$DB_PATH" --threads "$THREADS" \
+    kraken2-build --standard --db "$DB_PATH" \
         || { echo "[ERROR] Failed to download or build Kraken2 standard database at $DB_PATH."; conda deactivate; exit 1; }
 
     if [[ ! -f "$DB_PATH/hash.k2d" ]]; then
@@ -110,7 +110,7 @@ fi
 # Check if Kraken2 classification output exists and if user wants to skip
 if should_run_step "$KRAKEN2_OUT_DIR" "Kraken2 Classification"; then
     echo "[2/4] Running Kraken2 classification..."
-    conda activate kraken_env || { echo "[ERROR] Failed to activate 'kraken_env'. Please check your Conda environments."; exit 1; }
+    conda activate kraken2_env || { echo "[ERROR] Failed to activate 'kraken2_env'. Please check your Conda environments."; exit 1; }
 
     # Verify Kraken2 database path exists and contains necessary files
     if [ ! -d "$DB_PATH" ] || [ ! -f "$DB_PATH/hash.k2d" ] || [ ! -f "$DB_PATH/taxo.k2d" ]; then
@@ -159,7 +159,7 @@ if should_run_step "$KRAKEN2_OUT_DIR" "Kraken2 Classification"; then
         k2_output="${KRAKEN2_OUT_DIR}/${base_name}_classified.out"
         k2_report="${KRAKEN2_OUT_DIR}/${base_name}_report.txt"
         echo "? Processing $fastq_file with Kraken2..."
-        kraken2 --db "$DB_PATH" --threads "$THREADS" --output "$k2_output" --report "$k2_report" "$fastq_file" \
+        kraken2 --db "$DB_PATH" --output "$k2_output" --report "$k2_report" "$fastq_file" \
             || { echo "[ERROR] Kraken2 failed for $fastq_file. Please check its format and integrity. Exiting."; conda deactivate; exit 1; }
     done
     echo "[INFO] Kraken2 classification completed. Reports in $KRAKEN2_OUT_DIR"
@@ -172,11 +172,11 @@ fi
 # Check if the merged FASTQ file exists and if user wants to skip
 if should_run_step "$MERGED_FASTQ" "TaxID Filtering and Merging"; then
     echo "[3/4] Filtering reads for TaxID $TAXID and merging..."
-    conda activate kraken_env || { echo "[ERROR] Failed to activate 'kraken_env' for filtering. Please check your Conda environments."; exit 1; }
+    conda activate kraken2_env || { echo "[ERROR] Failed to activate 'kraken2_env' for filtering. Please check your Conda environments."; exit 1; }
 
     # Ensure seqtk is available in the environment
     if ! command_exists seqtk; then
-        echo "[ERROR] 'seqtk' is not installed or not in PATH. Aborting filtering. Ensure it's in 'kraken_env'."
+        echo "[ERROR] 'seqtk' is not installed or not in PATH. Aborting filtering. Ensure it's in 'kraken2_env'."
         conda deactivate
         exit 1
     fi
