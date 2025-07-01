@@ -25,11 +25,14 @@ This pipeline includes scripts and configurations for:
     
 - **Polishing**: Racon, Medaka, BWA, Pilon
 
+- **Differential analysis**: Hisat2, featureCounts
+
 
 ## ✅ Requirements
 - Bash (Linux environment)
 - Conda or Miniconda installed
 - Compatible bioinformatics tools installed and accessible in your $PATH (**read the SetupEnvironments file**)
+- R Studio (only for differential analysis and graphical representation)
 
 
 ## 🚀 Running the Pipeline
