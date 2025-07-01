@@ -50,20 +50,7 @@ read -r -p "Enter the desired output directory path: " OUTDIR
 read -r -p "Enter the number of threads to use: " THREADS
 
 # ---
-# Conditional annotation input
-PERFORM_ANNOTATION="n" # Default to no annotation
-read -r -p "Do you want to perform variant annotation? (y/n): " ANNOTATION_CHOICE
-if [[ "$ANNOTATION_CHOICE" =~ ^[SsYy]$ ]]; then
-  PERFORM_ANNOTATION="y"
-  read -r -p "Enter the path to the GFF3 annotation file (used by bcftools csq): " GFF
-  echo "[TIP] You can find GFF3 files from the EMBL-EBI ENA database (https://www.ebi.ac.uk/ena/). Search using the accession number of your reference genome and download the GFF3 format."
-else
-  echo "[INFO] Variant annotation will be skipped."
-  # Set dummy value for GFF if annotation is skipped
-  GFF=""
-fi
 
-# ---
 
 # === CHECK FILES ===
 # Verify that all input files exist before proceeding.
@@ -150,33 +137,6 @@ if should_run_step "$FILTERED_VCF_OUTPUT" "Filter BCFtools-based Variants"; then
 else
   echo "[2] Skipping filtering of BCFtools-based variants."
 fi
-
-# ---
-
-# === STEP 3: Annotate Filtered Variants using BCFtools csq (Conditional) ===
-ANNOTATED_VCF_OUTPUT="$OUTDIR/variant_calling_bcftools/denovo_vs_ref_filtered_annotated_bcftools.vcf"
-if [[ "$PERFORM_ANNOTATION" == "y" ]]; then
-  if should_run_step "$ANNOTATED_VCF_OUTPUT" "Annotation of Filtered De novo vs Reference Variants (BCFtools csq)"; then
-    echo "[3] Annotating filtered de novo vs reference variants using BCFtools csq..."
-    conda activate qc_env || { echo "[ERROR] Could not activate 'qc_env'. Check your Conda environments."; exit 1; }
-
-    # Ensure the reference FASTA is indexed for bcftools csq
-    if [[ ! -f "$REFERENCE.fai" ]]; then
-      echo "[INFO] Creating FASTA index for the reference genome ($REFERENCE.fai)..."
-      samtools faidx "$REFERENCE" || { echo "[ERROR] samtools faidx failed."; exit 1; }
-    fi
-
-    bcftools csq -f "$REFERENCE" -g "$GFF" -o "$ANNOTATED_VCF_OUTPUT" "$FILTERED_VCF_OUTPUT" || { echo "[ERROR] bcftools csq annotation failed."; exit 1; }
-    conda deactivate
-    echo "[INFO] Annotated filtered variants de novo vs Reference (BCFtools csq): $ANNOTATED_VCF_OUTPUT"
-  else
-    echo "[3] Skipping annotation of filtered variants (BCFtools csq)."
-  fi
-else
-  echo "[INFO] Variant annotation was skipped as requested."
-fi
-
-# ---
 
 echo "-----------------------------------------------------------------"
 echo " De novo vs reference comparison pipeline completed successfully."
