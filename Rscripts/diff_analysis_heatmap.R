@@ -1,7 +1,7 @@
 library(DESeq2)
 library(ggplot2)
 library(pheatmap)
-library(RColorBrewer) # Assicurati che questa libreria sia caricata
+library(RColorBrewer) 
 
 counts_raw <- read.table("path/to/counts.txt", header=TRUE, row.names=1, comment.char="#")
 
