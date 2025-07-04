@@ -1,79 +1,72 @@
-library(tidyverse) # Per read_csv (da readr), pivot_wider, mutate, filter, column_to_rownames
-library(pheatmap)  # Per generare le heatmap
+library(tidyverse) 
+library(pheatmap)  
+nucleotide_csv_path <- "path/to/csvfile.csv" 
+protein_csv_path <- "path/to/csvfile.csv"   
+output_folder <- "path/to/folder" 
 
-# --- 1. Imposta i percorsi dei tuoi file CSV e della cartella di output ---
-# *** IMPORTANTE: MODIFICA QUESTI PERCORSI CON QUELLI CORRETTI SUL TUO COMPUTER ***
-nucleotidico_csv_path <- "C:/Users/silvi/Desktop/grafici_tesi/heatmap/nuc.csv" 
-proteico_csv_path <- "C:/Users/silvi/Desktop/grafici_tesi/heatmap/prot.csv"   
-output_folder <- "C:/Users/silvi/Desktop/grafici_tesi/heatmap" # Sembra che tu voglia salvarle nella stessa cartella
-
-# --- DEBUG: Verifica l'esistenza dei percorsi e la creazione della cartella di output ---
-cat("Verifica percorsi e output folder...\n")
-cat("Percorso nucleotidico:", nucleotidico_csv_path, " - Esiste:", file.exists(nucleotidico_csv_path), "\n")
-cat("Percorso proteico:", proteico_csv_path, " - Esiste:", file.exists(proteico_csv_path), "\n")
+cat("Checking paths and output folder...\n")
+cat("Nucleotide path:", nucleotide_csv_path, " - Exists:", file.exists(nucleotide_csv_path), "\n")
+cat("Protein path:", protein_csv_path, " - Exists:", file.exists(protein_csv_path), "\n")
 
 if (!dir.exists(output_folder)) {
-  cat("La cartella di output non esiste. Provando a crearla:", output_folder, "\n")
+  cat("The output folder does not exist. Trying to create it:", output_folder, "\n")
   dir_created <- dir.create(output_folder, recursive = TRUE, showWarnings = TRUE)
   if (dir_created) {
-    cat("Cartella di output creata con successo.\n")
+    cat("Output folder successfully created.\n")
   } else {
-    stop("Impossibile creare la cartella di output. Controlla i permessi: ", output_folder)
+    stop("Unable to create output folder. Check permissions: ", output_folder)
   }
 } else {
-  cat("La cartella di output esiste già:", output_folder, "\n")
+  cat("Output folder already exists:", output_folder, "\n")
 }
 
-cat("Inizio elaborazione dei file CSV...\n")
+cat("Starting processing of CSV files...\n")
 
-# --- 2. Processo per il CSV Nucleotidico ---
-cat("\nElaborazione dati nucleotidici...\n")
+# --- 2. Processing for the Nucleotide CSV ---
+cat("\nProcessing nucleotide data...\n")
 
 tryCatch({
-  # Leggi il file CSV nucleotidico - CAMBIATO delim = ";" con sep = ";"
-  # Se hai caricato altri pacchetti che hanno una funzione read_csv con lo stesso nome
-  # ma con parametri diversi, potresti dover specificare readr::read_csv
-  # per forzare l'uso della versione di tidyverse.
-  df_nt_long <- read.csv(nucleotidico_csv_path, sep = ";", stringsAsFactors = FALSE) # Usiamo read.csv base, con sep
+  # Read the nucleotide CSV file - CHANGED delim = ";" to sep = ";"
+  # If you have other packages loaded with a read_csv function having different parameters,
+  # you may need to specify readr::read_csv to force using the tidyverse version.
+  df_nt_long <- read.csv(nucleotide_csv_path, sep = ";", stringsAsFactors = FALSE) # Using base read.csv, with sep
   
-  # Aggiungiamo anche il controllo dei nomi delle colonne, perché read.csv potrebbe non inferire bene
-  # e per la conversione dell'identità
-  # E anche col_types = cols() non è un parametro di read.csv, quindi lo tolgo
+  # Add a check for column names, as read.csv may not infer them well,
+  # and also for identity conversion
+  cat("Nucleotide file read. Dimensions:", dim(df_nt_long), "\n")
   
-  cat("File nucleotidico letto. Dimensioni:", dim(df_nt_long), "\n")
-  
-  # Controlla se le colonne necessarie esistono
+  # Check if the necessary columns exist
   if (!all(c("gene", "reference", "identity") %in% names(df_nt_long))) {
-    stop("Il file nucleotidico non contiene le colonne 'gene', 'reference' e 'identity'. Nomi colonne trovati: ", paste(names(df_nt_long), collapse = ", "))
+    stop("The nucleotide file does not contain columns 'gene', 'reference', and 'identity'. Found column names: ", paste(names(df_nt_long), collapse = ", "))
   }
   
-  # Trasforma la colonna 'identity' in numerico, gestendo la virgola come separatore decimale
+  # Convert the 'identity' column to numeric, handling the comma as a decimal separator
   df_nt_long <- df_nt_long %>%
     mutate(identity = as.numeric(gsub(",", ".", as.character(identity))))
-  cat("Colonna 'identity' nucleotidica convertita a numerico.\n")
+  cat("Nucleotide 'identity' column converted to numeric.\n")
   
-  # Trasforma da formato "lungo" a formato "largo" (matrice)
+  # Pivot from "long" to "wide" format (matrix)
   df_nt_matrix_data <- df_nt_long %>%
     pivot_wider(names_from = reference, values_from = identity) %>%
     column_to_rownames("gene")
   
-  cat("Dati nucleotidici pivottati. Dimensioni del dataframe:", dim(df_nt_matrix_data), "\n")
+  cat("Nucleotide data pivoted. Dataframe dimensions:", dim(df_nt_matrix_data), "\n")
   
-  # Converti il dataframe in una matrice numerica per pheatmap
+  # Convert the dataframe to a numeric matrix for pheatmap
   nt_matrix <- as.matrix(df_nt_matrix_data)
-  cat("Matrice nucleotidica creata. Dimensioni:", dim(nt_matrix), "\n")
+  cat("Nucleotide matrix created. Dimensions:", dim(nt_matrix), "\n")
   
-  # Controlla se la matrice è vuota o contiene solo NA
+  # Check if the matrix is empty or contains only NA
   if (nrow(nt_matrix) == 0 || ncol(nt_matrix) == 0 || all(is.na(nt_matrix))) {
-    stop("La matrice nucleotidica è vuota o contiene solo valori NA. Impossibile creare la heatmap.")
+    stop("The nucleotide matrix is empty or contains only NA values. Unable to create heatmap.")
   }
   
-  # Crea e salva la Heatmap Nucleotidica
-  output_nt_path <- file.path(output_folder, "heatmap_nucleotidica.png")
-  cat("Tentativo di salvare heatmap nucleotidica in:", output_nt_path, "\n")
+  # Create and save the Nucleotide Heatmap
+  output_nt_path <- file.path(output_folder, "nucleotide_heatmap.png")
+  cat("Attempting to save nucleotide heatmap to:", output_nt_path, "\n")
   png(output_nt_path, width=900, height=800, res=150)
   pheatmap(nt_matrix,
-           main = "Heatmap identità nucleotidica dei geni chiave",
+           main = "Nucleotide Identity Heatmap of Key Genes",
            color = colorRampPalette(c("white", "lightblue"))(100),
            cluster_rows = TRUE,    
            cluster_cols = TRUE,    
@@ -83,59 +76,59 @@ tryCatch({
            na_col = "grey"         
   )
   dev.off() 
-  cat("Heatmap nucleotidica salvata con successo.\n")
+  cat("Nucleotide heatmap successfully saved.\n")
   
 }, error = function(e) {
-  cat("!!! Errore critico nell'elaborazione del file nucleotidico: ", e$message, "\n")
+  cat("!!! Critical error in processing nucleotide file: ", e$message, "\n")
   if (!is.null(dev.list())) {
     dev.off() 
-    cat("Dispositivo grafico chiuso a causa dell'errore.\n")
+    cat("Graphics device closed due to error.\n")
   }
 })
 
 
-# --- 3. Processo per il CSV Proteico (Aminoacidico) ---
-cat("\nElaborazione dati aminoacidici...\n")
+# --- 3. Processing for the Protein (Amino Acid) CSV ---
+cat("\nProcessing amino acid data...\n")
 
 tryCatch({
-  # Leggi il file CSV proteico - CAMBIATO delim = ";" con sep = ";"
-  df_aa_long <- read.csv(proteico_csv_path, sep = ";", stringsAsFactors = FALSE) # Usiamo read.csv base, con sep
+  # Read the protein CSV file - CHANGED delim = ";" to sep = ";"
+  df_aa_long <- read.csv(protein_csv_path, sep = ";", stringsAsFactors = FALSE) # Using base read.csv, with sep
   
-  cat("File aminoacidico letto. Dimensioni:", dim(df_aa_long), "\n")
+  cat("Amino acid file read. Dimensions:", dim(df_aa_long), "\n")
   
-  # Controlla se le colonne necessarie esistono
+  # Check if the necessary columns exist
   if (!all(c("protein", "reference", "identity") %in% names(df_aa_long))) {
-    stop("Il file proteico non contiene le colonne 'protein', 'reference' e 'identity'. Nomi colonne trovati: ", paste(names(df_aa_long), collapse = ", "))
+    stop("The protein file does not contain columns 'protein', 'reference', and 'identity'. Found column names: ", paste(names(df_aa_long), collapse = ", "))
   }
   
-  # Trasforma la colonna 'identity' in numerico, gestendo la virgola come separatore decimale
+  # Convert the 'identity' column to numeric, handling the comma as a decimal separator
   df_aa_long <- df_aa_long %>%
     mutate(identity = as.numeric(gsub(",", ".", as.character(identity))))
   
-  cat("Colonna 'identity' aminoacidica convertita a numerico.\n")
+  cat("Amino acid 'identity' column converted to numeric.\n")
   
-  # Trasforma da formato "lungo" a formato "largo" (matrice)
+  # Pivot from "long" to "wide" format (matrix)
   df_aa_matrix_data <- df_aa_long %>%
     pivot_wider(names_from = reference, values_from = identity) %>%
     column_to_rownames("protein")
   
-  cat("Dati aminoacidici pivottati. Dimensioni del dataframe:", dim(df_aa_matrix_data), "\n")
+  cat("Amino acid data pivoted. Dataframe dimensions:", dim(df_aa_matrix_data), "\n")
   
-  # Converti il dataframe in una matrice numerica per pheatmap
+  # Convert the dataframe to a numeric matrix for pheatmap
   aa_matrix <- as.matrix(df_aa_matrix_data)
-  cat("Matrice aminoacidica creata. Dimensioni:", dim(aa_matrix), "\n")
+  cat("Amino acid matrix created. Dimensions:", dim(aa_matrix), "\n")
   
-  # Controlla se la matrice è vuota o contiene solo NA
+  # Check if the matrix is empty or contains only NA
   if (nrow(aa_matrix) == 0 || ncol(aa_matrix) == 0 || all(is.na(aa_matrix))) {
-    stop("La matrice aminoacidica è vuota o contiene solo valori NA. Impossibile creare la heatmap.")
+    stop("The amino acid matrix is empty or contains only NA values. Unable to create heatmap.")
   }
   
-  # Crea e salva la Heatmap Proteica
-  output_aa_path <- file.path(output_folder, "heatmap_aminoacidica.png")
-  cat("Tentativo di salvare heatmap aminoacidica in:", output_aa_path, "\n")
+  # Create and save the Protein Heatmap
+  output_aa_path <- file.path(output_folder, "aminoacid_heatmap.png")
+  cat("Attempting to save amino acid heatmap to:", output_aa_path, "\n")
   png(output_aa_path, width=900, height=800, res=150)
   pheatmap(aa_matrix,
-           main = "Heatmap identità aminoacidica dei geni chiave",
+           main = "Amino Acid Identity Heatmap of Key Genes",
            color = colorRampPalette(c("white", "lightblue"))(100),
            cluster_rows = TRUE,
            cluster_cols = TRUE,
@@ -145,14 +138,14 @@ tryCatch({
            na_col = "grey"
   )
   dev.off() 
-  cat("Heatmap aminoacidica salvata con successo.\n")
+  cat("Amino acid heatmap successfully saved.\n")
   
 }, error = function(e) {
-  cat("!!! Errore critico nell'elaborazione del file proteico: ", e$message, "\n")
+  cat("!!! Critical error in processing protein file: ", e$message, "\n")
   if (!is.null(dev.list())) {
     dev.off() 
-    cat("Dispositivo grafico chiuso a causa dell'errore.\n")
+    cat("Graphics device closed due to error.\n")
   }
 })
 
-cat("\nProcesso completato. Controlla la cartella '", output_folder, "' per le tue heatmap.\n", sep = "")
+cat("\nProcess completed. Check the folder '", output_folder, "' for your heatmaps.\n", sep = "")
