@@ -51,13 +51,9 @@ read -r -p "Enter the number of threads to use: " THREADS
 
 # ---
 
-
 # === CHECK FILES ===
 # Verify that all input files exist before proceeding.
-REQUIRED_FILES=("$REFERENCE" "$DENOVO_GENOME")
-if [[ "$PERFORM_ANNOTATION" == "y" ]]; then
-  REQUIRED_FILES+=("$GFF")
-fi
+
 
 for FILE in "${REQUIRED_FILES[@]}"; do
   [[ -f "$FILE" ]] || { echo "[ERROR] Missing input: $FILE"; exit 1; }
@@ -75,9 +71,9 @@ MUMMER_OUTPUT_CHECK="$OUTDIR/aln_mummer/ref_vs_denovo.coords"
 if should_run_step "$MUMMER_OUTPUT_CHECK" "MUMmer Comparison"; then
   echo "[0] Running MUMmer comparison (reference vs your de novo assembly)..."
   conda activate mummer_env || { echo "[ERROR] Could not activate 'mummer_env'. Check your Conda environments."; exit 1; }
-  nucmer --prefix="$OUTDIR/aln_mummer/ref_vs_denovo" "$REFERENCE" "$DENOVO_GENOME" || { echo "[ERROR] nucmer failed."; exit 1; }
+  nucmer --prefix="$OUTDIR/aln_mummer/ref_vs_denovo" "$DENOVO_GENOME" "$REFERENCE" || { echo "[ERROR] nucmer failed."; exit 1; }
   delta-filter -1 "$OUTDIR/aln_mummer/ref_vs_denovo.delta" > "$OUTDIR/aln_mummer/ref_vs_denovo.filtered.delta" || { echo "[ERROR] delta-filter failed."; exit 1; }
-  show-coords -rcl "$OUTDIR/aln_mummer/ref_vs_denovo.filtered.delta" > "$OUTDIR/aln_mummer/ref_vs_denovo.coords" || { echo "[ERROR] show-coords failed."; exit 1; }
+  show-coords -rclT "$OUTDIR/aln_mummer/ref_vs_denovo.filtered.delta" > "$OUTDIR/aln_mummer/ref_vs_denovo.tsv" || { echo "[ERROR] show-coords failed."; exit 1; }
   
   # Check if gnuplot is available before trying mummerplot
   if ! command -v gnuplot &> /dev/null; then
@@ -138,14 +134,12 @@ else
   echo "[2] Skipping filtering of BCFtools-based variants."
 fi
 
+# ---
+
 echo "-----------------------------------------------------------------"
 echo " De novo vs reference comparison pipeline completed successfully."
 echo "--- Key comparison outputs ---"
 echo "-> Structural differences (MUMmer plots and coordinates): $OUTDIR/aln_mummer/"
-if [[ "$PERFORM_ANNOTATION" == "y" ]]; then
-  echo "-> High-confidence point mutations (de novo vs Reference, BCFtools-based, annotated with BCFtools csq): $ANNOTATED_VCF_OUTPUT"
-else
-  echo "-> High-confidence point mutations (de novo vs Reference, BCFtools-based, NOT ANNOTATED): $FILTERED_VCF_OUTPUT"
-fi
+
 echo ""
 echo "This script provides a robust comparison of your polished de novo assembly against the reference genome."
