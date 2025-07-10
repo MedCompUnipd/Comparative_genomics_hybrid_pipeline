@@ -227,7 +227,7 @@ export PATH="$PATH:$NEXTDENOVO_CLONE_DIR"
 
 echo "[5/9] Creating environment: rnaseq_env"
 if ! conda env list | grep -q "rnaseq_env"; then
-    conda create -y -n rnaseq_env -c bioconda -c conda-forge hisat2 samtools subread || {
+    conda create -y -n rnaseq_env -c bioconda -c conda-forge hisat2 samtools subread gffread || {
         echo "[ERROR] Failed to create 'rnaseq_env'. Exiting."
         exit 1
     }
@@ -243,7 +243,7 @@ declare -A envs=(
   ["qc_env"]="nanoplot fastqc qualimap bcftools samtools fastp"
   ["illuminareads_env"]="bwa pilon"
   ["mummer_env"]="mummer bedtools blast"
-  ["fasta3_env"]="pandas openpyxl biopython fasta3"
+  ["fasta3_env"]="pandas openpyxl biopython fasta3 xlsxwriter"
 )
 
 i=5
