@@ -83,12 +83,12 @@ run_step "Step 3: Assembly and polishing" "bash 3_asm_pol.sh" "" # Or leave empt
 run_step "Step 4: Using Illumina reads for hybrid assembly and polishing" "bash 4_hybrid.sh" "" # 4_hybrid.sh handles its own env activations
 run_step "Step 5: Comparing de novo assembly to reference and performing variant calling" "bash 5_variant_calling.sh" "qc_env" # or leave empty if handled internally
 run_step "Step 6: Performing Reciprocal Best Hit (RBH) alignment" "bash 6_rbh.sh" "" # glsearch36 is expected in PATH, no specific conda env needed by this script
-run_step "Step 7: Parse RBH glsearch output and create lists per identity" "python3 7_rbh_lists.py" "base" # Assuming pandas/Biopython in base, or specify another
+run_step "Step 7: Parse RBH glsearch output and create lists per identity" "python3 7_rbh_lists.py" "fasta3_env" 
 run_step "Step 8: Extracting sequences based on TSV coordinates" "python3 8_extract_genes.py" "fasta3_env"
 run_step "Step 9: Masking sequences with identity thresholds" "python3 9_masking.py" "" # No specific env required for this Python script beyond Python itself
 run_step "Step 10: Extracting unaligned regions and aligning to whole NCBI dataset" "bash 10_extract_align.sh" "fasta3_env"
 run_step "Step 11: Translating nucleotidic sequences to aminoacidic sequences" "bash 11_translation.sh" "fasta3_env"
-run_step "Step 12: Exploratory analysis of transcriptomic data" "bash 12_diff_analysis" "rnaseq_env"
+run_step "Step 12: Exploratory analysis of transcriptomic data" "bash 12_diff_analysis.sh" "rnaseq_env"
 
 # --- Final Suggestions and Pipeline End ---
 echo "" | tee -a "$LOGFILE_PATH"
