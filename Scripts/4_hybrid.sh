@@ -153,21 +153,22 @@ if should_run_step "$LOCAL_OUTPUT_DIR/3_fastqc" "FastQC and fastp"; then
   conda deactivate
 fi
 
-# === STEP 5: BWA + PILON ===
-if should_run_step "$LOCAL_OUTPUT_DIR/5_bwamem_pol/pilon_polished.fasta" "BWA and Pilon"; then
-  echo "[STEP 5] Aligning with BWA and polishing with Pilon..."
+# === STEP 5: HISAT2 + PILON ===
+if should_run_step "$LOCAL_OUTPUT_DIR/5_hisat2_pol/pilon_polished.fasta" "HISAT2 and Pilon"; then
+  echo "[STEP 5] Aligning with HISAT2 and polishing with Pilon..."
   safe_activate illuminareads_env
-  mkdir -p "$LOCAL_OUTPUT_DIR/5_bwamem_pol"
-  cd "$LOCAL_OUTPUT_DIR/5_bwamem_pol"
+  mkdir -p "$LOCAL_OUTPUT_DIR/5_hisat2_pol"
+  cd "$LOCAL_OUTPUT_DIR/5_hisat2_pol"
 
-  [[ ! -f "${GENOME}.bwt" ]] && bwa index "$GENOME"
+  [[ ! -f "${GENOME}.1.ht2" ]] && hisat2-build "$GENOME" "${GENOME}_index"
 
   BAM_LIST=()
   for R1 in "$LOCAL_OUTPUT_DIR"/4_fastp/*_R1.fastq.gz; do
     SAMPLE=$(basename "$R1" _R1.fastq.gz)
     R2="${R1/_R1.fastq.gz/_R2.fastq.gz}"
     BAM="${SAMPLE}.bam"
-    bwa mem -t "$THREADS" "$GENOME" "$R1" "$R2" | samtools sort -@ "$THREADS" -o "$BAM"
+    
+    hisat2 -p "$THREADS" -x "${GENOME}_index" -1 "$R1" -2 "$R2" | samtools sort -@ "$THREADS" -o "$BAM"
     samtools index "$BAM"
     BAM_LIST+=("$BAM")
   done
@@ -177,6 +178,7 @@ if should_run_step "$LOCAL_OUTPUT_DIR/5_bwamem_pol/pilon_polished.fasta" "BWA an
 
   read -p "Enter the path to pilon.jar: " PILON_JAR
   [[ ! -f "$PILON_JAR" ]] && { echo "[ERROR] pilon.jar not found."; exit 1; }
+
   read -p "Enter amount of RAM for Java (e.g., 32G): " JAVA_RAM
 
   java -Xmx${JAVA_RAM} -jar "$PILON_JAR" \
@@ -189,11 +191,12 @@ if should_run_step "$LOCAL_OUTPUT_DIR/5_bwamem_pol/pilon_polished.fasta" "BWA an
   conda deactivate
 fi
 
+
 # === STEP 6: QUAST ===
 if should_run_step "$LOCAL_OUTPUT_DIR/6_quast" "QUAST Analysis"; then
   echo "[STEP 6] Running QUAST..."
   mkdir -p "$LOCAL_OUTPUT_DIR/6_quast"
-  quast.py -t "$THREADS" -o "$LOCAL_OUTPUT_DIR/6_quast" "$LOCAL_OUTPUT_DIR/5_bwamem_pol/pilon_polished.fasta"
+  quast.py -t "$THREADS" -o "$LOCAL_OUTPUT_DIR/6_quast" "$LOCAL_OUTPUT_DIR/5_hisat2_pol/pilon_polished.fasta"
 fi
 
 # === STEP 7: QUALIMAP ===
@@ -210,7 +213,7 @@ if should_run_step "$LOCAL_OUTPUT_DIR/7_mapping/qualimap_report" "Qualimap Analy
 
   cd "$LOCAL_OUTPUT_DIR/7_mapping"
   safe_activate preprocessing_env
-  minimap2 -ax map-ont "$LOCAL_OUTPUT_DIR/5_bwamem_pol/pilon_polished.fasta" "$MERGED_READS" -t "$THREADS" > mapped.sam
+  minimap2 -ax map-ont "$LOCAL_OUTPUT_DIR/5_hisat2_pol/pilon_polished.fasta" "$MERGED_READS" -t "$THREADS" > mapped.sam
   conda deactivate
 
   safe_activate qc_env
