@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import csv
 from decimal import Decimal, InvalidOperation
 import os
 import sys
+import io # Import io module for StringIO
 
 print("--- Genome Masking Script ---")
 print("-----------------------------")
 
 # ==== User Input ====
 print("Please provide the required paths:")
-tsv_file = input("Enter path to TSV file (e.g., RBH_all.tsv or RBH_100.tsv): ").strip()
+tsv_file = input("Enter path to TSV alignment mummer file (e.g., ref_denovo.tsv): ").strip()
 fasta_file = input("Enter path to the input FASTA file (the contig to be masked): ").strip()
 output_dir = input("Enter path to output directory for masked FASTA files: ").strip()
 
@@ -33,15 +35,52 @@ def parse_tsv(tsv_path, min_id=Decimal("0.0"), max_id=Decimal("100.0")):
     regions = []
     try:
         with open(tsv_path, newline='') as tsvfile:
-            reader = csv.DictReader(tsvfile, delimiter='\t')
+            lines = tsvfile.readlines()
+            
+            # Check if there are enough lines in the file
+            # Now expecting at least 4 lines (3 to skip + 1 header line)
+            if len(lines) < 4: 
+                sys.exit(f"[ERROR] TSV file '{tsv_path}' does not contain enough lines (expected at least 4 including header).")
+
+            # The header is on the 4th line (index 3)
+            header_line = lines[3].strip()
+            
+            # --- NEW: Strip brackets from header_line ---
+            header_line = header_line.replace('[', '').replace(']', '')
+            # --- END NEW ---
+            
+            # The data starts from the 5th line (index 4) onwards
+            data_lines = [line.strip() for line in lines[4:] if line.strip()] # Filter out empty lines
+
+            if not header_line:
+                sys.exit(f"[ERROR] The header line (4th line) in TSV file '{tsv_path}' is empty.")
+            
+            # Combine header and data lines into a single string to be read by DictReader
+            full_tsv_content = header_line + '\n' + '\n'.join(data_lines)
+            
+            # Use io.StringIO to treat the string as a file-like object
+            tsv_reader_input = io.StringIO(full_tsv_content)
+            
+            # Utilizziamo le intestazioni del tuo file TSV
+            # Le colonne di interesse sono '% IDY', 'S1' e 'E1'
+            reader = csv.DictReader(tsv_reader_input, delimiter='\t') 
+            
+            # Controllo per assicurarsi che le colonne necessarie siano presenti
+            required_columns = ['% IDY', 'S1', 'E1']
+            if not all(col in reader.fieldnames for col in required_columns):
+                sys.exit(f"[ERROR] TSV file is missing one or more required columns: {', '.join(required_columns)}. Found: {', '.join(reader.fieldnames)}")
+
             for row in reader:
                 try:
-                    identity = Decimal(row['Identity'].strip())
-                    start_1b = int(row['Contig_Start'])
-                    end_1b = int(row['Contig_End'])
+                    # Modificato per usare i nomi delle colonne dal tuo TSV
+                    identity = Decimal(row['% IDY'].strip())
+                    start_1b = int(row['S1'])
+                    end_1b = int(row['E1'])
 
-                    start = min(start_1b, end_1b) - 1
-                    end = max(start_1b, end_1b)
+                    # Mantiene la logica per gestire allineamenti in entrambe le direzioni
+                    # Converti a 0-based start (Python slicing � esclusivo sull'end)
+                    start = min(start_1b, end_1b) - 1 
+                    end = max(start_1b, end_1b)       
 
                     if min_id <= identity <= max_id:
                         regions.append((start, end))
@@ -99,21 +138,6 @@ print(f"[INFO] Loading FASTA file: {fasta_file}")
 header, sequence = load_fasta(fasta_file)
 print(f"[INFO] FASTA sequence loaded. Length: {len(sequence)}")
 
-# Mask 100% identity
-print("[INFO] Masking regions with 100% identity...")
-regions_100 = parse_tsv(tsv_file, min_id=Decimal("100.0"), max_id=Decimal("100.0"))
-masked_100 = mask_sequence(sequence, regions_100)
-output_100 = os.path.join(output_dir, f"{prefix}_masked_100.fasta")
-write_fasta(header, masked_100, output_100)
-print(f"[INFO] Saved: {output_100}")
-
-# Mask 95â€“99.9% identity
-print("[INFO] Masking regions with 95.0% to 99.9% identity...")
-regions_95_999 = parse_tsv(tsv_file, min_id=Decimal("95.0"), max_id=Decimal("99.9"))
-masked_95_999 = mask_sequence(sequence, regions_95_999)
-output_95_999 = os.path.join(output_dir, f"{prefix}_masked_95_99.9.fasta")
-write_fasta(header, masked_95_999, output_95_999)
-print(f"[INFO] Saved: {output_95_999}")
 
 # Mask ALL aligned regions
 print("[INFO] Masking ALL aligned regions (regardless of identity)...")
